@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>에어컨 제어</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- 상단: 장치 카드 영역 -->
+        <header class="header">
+            <h1>에어컨 제어</h1>
+            <div class="devices-grid" id="devicesGrid">
+                <!-- 장치 카드들이 동적으로 생성됩니다 -->
+            </div>
+            <div class="all-control">
+                <button id="allSelectBtn" class="btn-all btn-select">전체 선택</button>
+                <button id="allOnBtn" class="btn-all btn-on">전체 켜기</button>
+                <button id="allOffBtn" class="btn-all btn-off">전체 끄기</button>
+            </div>
+        </header>
+
+        <!-- 하단: 제어 패널 -->
+        <div class="control-panel" id="controlPanel">
+            <div class="panel-header">
+                <h2 id="selectedDevice">장치 선택</h2>
+            </div>
+
+            <div class="control-section">
+                <!-- 전원 -->
+                <div class="control-item">
+                    <label>전원</label>
+                    <div class="toggle-group">
+                        <button class="toggle-btn active" data-value="on">켜기</button>
+                        <button class="toggle-btn" data-value="off">끄기</button>
+                    </div>
+                </div>
+
+                <!-- 모드 -->
+                <div class="control-item">
+                    <label>운전 모드</label>
+                    <div class="toggle-group">
+                        <button class="toggle-btn active" data-value="cool">냉방</button>
+                        <button class="toggle-btn" data-value="hot">난방</button>
+                    </div>
+                </div>
+
+                <!-- 온도 -->
+                <div class="control-item">
+                    <label>설정 온도</label>
+                    <div class="temp-control">
+                        <button class="btn-temp" id="tempDown">−</button>
+                        <span class="temp-display" id="tempValue">24</span>
+                        <button class="btn-temp" id="tempUp">+</button>
+                        <span style="font-size: 12px; margin-left: 4px;">°C</span>
+                    </div>
+                </div>
+
+                <!-- 풍량 -->
+                <div class="control-item">
+                    <label>풍량</label>
+                    <div class="button-group">
+                        <button class="btn-option active" data-value="auto">자동</button>
+                        <button class="btn-option" data-value="low">약</button>
+                        <button class="btn-option" data-value="medium">중</button>
+                        <button class="btn-option" data-value="high">강</button>
+                    </div>
+                </div>
+
+                <!-- 풍향 -->
+                <div class="control-item">
+                    <label>풍향 자동</label>
+                    <div class="toggle-group">
+                        <button class="toggle-btn" data-value="off">끄기</button>
+                        <button class="toggle-btn active" data-value="on">켜기</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="control-actions">
+                <button id="applyBtn" class="btn-apply">설정 적용</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="api.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+
