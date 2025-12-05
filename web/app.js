@@ -12,6 +12,15 @@ const DEVICE_ORDER = [
 let devices = [];
 let deviceStatuses = {};
 let selectedDeviceIds = []; // 여러 장치 선택 가능
+let pendingDevices = new Set(); // 진행중인 장치 목록
+
+// Health 상태 안정화를 위한 히스토리 관리
+const healthHistory = {}; // { deviceId: { recent: [{healthy, timestamp}], stable: true/false, lastChangeTime } }
+const HEALTH_HISTORY_SIZE = 10; // 최근 10개 상태 저장
+const HEALTH_TO_UNHEALTHY_FAILURES = 5; // 연속 5번 실패해야 unhealthy로 변경 (약 25초)
+const HEALTH_TO_HEALTHY_SUCCESSES = 6; // 연속 6번 성공해야 healthy로 변경 (약 30초)
+const HEALTH_MIN_FAILURE_RATIO = 0.7; // 최근 히스토리 중 70% 이상 실패해야 unhealthy
+const HEALTH_MIN_SUCCESS_RATIO = 0.8; // 최근 히스토리 중 80% 이상 성공해야 healthy
 
 // 저장된 설정 불러오기
 function loadSavedCommand() {
@@ -70,20 +79,139 @@ async function loadDevices() {
     // 장치를 고정 순서로 정렬
     devices = DEVICE_ORDER.map(id => {
         const device = allDevices.find(d => d.id === id);
+        // 새로 발견된 장치의 health 히스토리 초기화
+        if (device && !healthHistory[id]) {
+            healthHistory[id] = {
+                recent: [],
+                stable: false,
+                lastChangeTime: Date.now()
+            };
+        }
         return device || { id, ip: '', port: 80 }; // 없으면 빈 장치로 표시
     });
     
     renderDevices();
 }
 
+// Health 상태 안정화 함수
+function updateHealthStability(deviceId, isHealthy) {
+    if (!healthHistory[deviceId]) {
+        healthHistory[deviceId] = {
+            recent: [],
+            stable: isHealthy,
+            lastChangeTime: Date.now()
+        };
+    }
+    
+    const history = healthHistory[deviceId];
+    const now = Date.now();
+    
+    // 최근 상태 추가 (타임스탬프 포함)
+    history.recent.push({
+        healthy: isHealthy,
+        timestamp: now
+    });
+    
+    // 최대 개수 유지
+    if (history.recent.length > HEALTH_HISTORY_SIZE) {
+        history.recent.shift();
+    }
+    
+    // 히스토리가 부족하면 현재 상태 사용 (초기 상태)
+    if (history.recent.length < 3) {
+        history.stable = isHealthy;
+        return history.stable;
+    }
+    
+    // 현재 안정화된 상태
+    const currentStable = history.stable;
+    
+    // 상태 변경이 필요한지 확인
+    if (currentStable === isHealthy) {
+        // 현재 상태와 같으면 그대로 유지
+        return currentStable;
+    }
+    
+    // 상태가 다를 때만 변경 여부 판단
+    if (!currentStable && isHealthy) {
+        // Unhealthy → Healthy: 더 엄격한 조건 필요
+        
+        // 방법 1: 연속 성공 횟수 확인
+        const recentHealthy = history.recent.slice(-HEALTH_TO_HEALTHY_SUCCESSES);
+        if (recentHealthy.length >= HEALTH_TO_HEALTHY_SUCCESSES) {
+            const allHealthy = recentHealthy.every(entry => entry.healthy);
+            if (allHealthy) {
+                history.stable = true;
+                history.lastChangeTime = now;
+                return true;
+            }
+        }
+        
+        // 방법 2: 최근 히스토리 비율 확인
+        const recentEntries = history.recent.slice(-HEALTH_HISTORY_SIZE);
+        const successCount = recentEntries.filter(entry => entry.healthy).length;
+        const successRatio = successCount / recentEntries.length;
+        
+        if (successRatio >= HEALTH_MIN_SUCCESS_RATIO && recentEntries.length >= 5) {
+            history.stable = true;
+            history.lastChangeTime = now;
+            return true;
+        }
+        
+        // 조건을 만족하지 않으면 기존 상태 유지
+        return currentStable;
+        
+    } else if (currentStable && !isHealthy) {
+        // Healthy → Unhealthy: 더 완화된 조건 (일시적 실패 허용)
+        
+        // 방법 1: 연속 실패 횟수 확인
+        const recentUnhealthy = history.recent.slice(-HEALTH_TO_UNHEALTHY_FAILURES);
+        if (recentUnhealthy.length >= HEALTH_TO_UNHEALTHY_FAILURES) {
+            const allUnhealthy = recentUnhealthy.every(entry => !entry.healthy);
+            if (allUnhealthy) {
+                history.stable = false;
+                history.lastChangeTime = now;
+                return false;
+            }
+        }
+        
+        // 방법 2: 최근 히스토리 비율 확인
+        const recentEntries = history.recent.slice(-HEALTH_HISTORY_SIZE);
+        const failureCount = recentEntries.filter(entry => !entry.healthy).length;
+        const failureRatio = failureCount / recentEntries.length;
+        
+        if (failureRatio >= HEALTH_MIN_FAILURE_RATIO && recentEntries.length >= 5) {
+            history.stable = false;
+            history.lastChangeTime = now;
+            return false;
+        }
+        
+        // 조건을 만족하지 않으면 기존 상태 유지
+        return currentStable;
+    }
+    
+    return currentStable;
+}
+
 // 상태 업데이트
 async function updateStatus() {
     const statuses = await api.getAllStatus();
     
-    // 상태를 객체로 변환
+    // 상태를 객체로 변환하고 health 안정화 적용
     deviceStatuses = {};
     statuses.forEach(status => {
-        deviceStatuses[status.id] = status;
+        const rawHealthy = status?.health?.ok || false;
+        const stableHealthy = updateHealthStability(status.id, rawHealthy);
+        
+        // 안정화된 health 상태로 덮어쓰기
+        deviceStatuses[status.id] = {
+            ...status,
+            health: {
+                ...status.health,
+                ok: stableHealthy,
+                raw: rawHealthy // 원본 상태도 보관 (디버깅용)
+            }
+        };
     });
     
     renderDevices();
@@ -103,15 +231,21 @@ function renderDevices() {
         const roomTemp = state?.room_temp !== null && state?.room_temp !== undefined 
             ? parseFloat(state.room_temp).toFixed(1) 
             : '--';
+        const mode = state?.mode || null;
+        const modeText = mode === 'hot' ? '난방' : mode === 'cool' ? '냉방' : '';
         
         const card = document.createElement('div');
         const isSelected = selectedDeviceIds.includes(deviceId);
         const exists = device && device.ip; // 실제 장치가 존재하는지 확인
+        const isPending = pendingDevices.has(deviceId); // 진행중인지 확인
+        const hasTemp = roomTemp !== '--'; // 온도 정보가 있는지 확인
+        const hasIssue = !hasTemp || !isHealthy; // 온도 정보가 없거나 health가 안 좋으면 문제
         
-        card.className = `device-card ${!exists || !isHealthy ? 'disabled' : ''} ${isSelected ? 'selected' : ''}`;
+        card.className = `device-card ${isSelected ? 'selected' : ''} ${isPending ? 'pending' : ''}`;
         card.dataset.deviceId = deviceId;
         
-        if (exists && isHealthy) {
+        // 진행중이 아닐 때만 클릭 가능
+        if (!isPending) {
             card.addEventListener('click', () => selectDevice(deviceId));
         }
         
@@ -119,16 +253,15 @@ function renderDevices() {
             <div class="device-header">
                 <div class="device-id">${deviceId}</div>
                 <div class="device-status">
-                    <div class="status-indicator ${exists && isHealthy ? 'active' : 'inactive'}"></div>
+                    ${isPending ? '<div class="status-indicator pending-indicator"></div>' : `<div class="status-indicator ${!hasIssue ? 'active' : 'inactive'}"></div>`}
                 </div>
             </div>
             <div class="device-info">
                 <div class="power-status">
-                    <span class="power-icon ${isOn ? 'on' : 'off'}">${isOn ? '●' : '○'}</span>
-                    <span>${isOn ? 'ON' : 'OFF'}</span>
+                    ${isPending ? '<span class="pending-text">진행중...</span>' : `<span class="power-icon ${isOn ? 'on' : 'off'}">${isOn ? '●' : '○'}</span><span>${isOn ? 'ON' : 'OFF'}</span>${isOn && modeText ? `<span class="mode-badge mode-${mode}">${modeText}</span>` : ''}`}
                 </div>
                 <div class="temp-display">${roomTemp}°</div>
-                <div class="temp-label">실내온도</div>
+                <div class="temp-label">${isPending ? '명령 전송 중' : '실내온도'}</div>
             </div>
         `;
         
@@ -161,7 +294,10 @@ function selectAllDevices() {
         .filter(deviceId => {
             const device = devices.find(d => d.id === deviceId);
             const status = deviceStatuses[deviceId];
-            return device && device.ip && status?.health?.ok === true;
+            const state = status?.state || null;
+            const hasTemp = state?.room_temp !== null && state?.room_temp !== undefined;
+            // 장치가 존재하고 온도 정보가 있으면 선택 가능
+            return device && device.ip && hasTemp;
         });
     
     // 첫 번째 장치의 상태로 제어 패널 초기화
@@ -259,18 +395,52 @@ function setupEventListeners() {
     
     // 전체 켜기/끄기 (빠른 제어용 - 제어 패널 열지 않음)
     allOnBtn.addEventListener('click', async () => {
+        // 온도 정보가 있는 장치를 진행중으로 표시
+        DEVICE_ORDER.forEach(deviceId => {
+            const device = devices.find(d => d.id === deviceId);
+            const status = deviceStatuses[deviceId];
+            const state = status?.state || null;
+            const hasTemp = state?.room_temp !== null && state?.room_temp !== undefined;
+            if (device && device.ip && hasTemp) {
+                pendingDevices.add(deviceId);
+            }
+        });
+        renderDevices();
+        
         const result = await api.allOn();
         if (result) {
+            // 진행중 상태 해제
+            pendingDevices.clear();
             await updateStatus();
-            alert('전체 장치가 켜졌습니다.');
+        } else {
+            // 실패 시에도 진행중 상태 해제
+            pendingDevices.clear();
+            renderDevices();
         }
     });
     
     allOffBtn.addEventListener('click', async () => {
+        // 온도 정보가 있는 장치를 진행중으로 표시
+        DEVICE_ORDER.forEach(deviceId => {
+            const device = devices.find(d => d.id === deviceId);
+            const status = deviceStatuses[deviceId];
+            const state = status?.state || null;
+            const hasTemp = state?.room_temp !== null && state?.room_temp !== undefined;
+            if (device && device.ip && hasTemp) {
+                pendingDevices.add(deviceId);
+            }
+        });
+        renderDevices();
+        
         const result = await api.allOff();
         if (result) {
+            // 진행중 상태 해제
+            pendingDevices.clear();
             await updateStatus();
-            alert('전체 장치가 꺼졌습니다.');
+        } else {
+            // 실패 시에도 진행중 상태 해제
+            pendingDevices.clear();
+            renderDevices();
         }
     });
     
@@ -334,31 +504,26 @@ function setupEventListeners() {
     // 적용 버튼 - 선택된 장치(들)에 적용
     applyBtn.addEventListener('click', async () => {
         if (selectedDeviceIds.length === 0) {
-            alert('제어할 장치를 선택해주세요.');
             return;
         }
         
+        // 선택된 모든 장치를 진행중으로 표시
+        selectedDeviceIds.forEach(deviceId => {
+            pendingDevices.add(deviceId);
+        });
+        renderDevices();
+        
         const command = { ...currentCommand };
-        let successCount = 0;
-        let failCount = 0;
         
         // 선택된 모든 장치에 명령 전송
         for (const deviceId of selectedDeviceIds) {
             const result = await api.setDevice(deviceId, command);
-            if (result && result.result && result.result.ok) {
-                successCount++;
-            } else {
-                failCount++;
-            }
+            // 각 장치별로 완료되면 진행중 상태 해제
+            pendingDevices.delete(deviceId);
+            renderDevices();
         }
         
         await updateStatus();
-        
-        if (failCount === 0) {
-            alert(`${successCount}개 장치에 설정이 적용되었습니다.`);
-        } else {
-            alert(`적용 완료: ${successCount}개, 실패: ${failCount}개`);
-        }
     });
     
 }
@@ -368,6 +533,17 @@ function startAutoRefresh() {
     setInterval(async () => {
         await updateStatus();
     }, 5000); // 5초마다 업데이트
+    
+    // 초기 health 히스토리 초기화
+    DEVICE_ORDER.forEach(deviceId => {
+        if (!healthHistory[deviceId]) {
+            healthHistory[deviceId] = {
+                recent: [],
+                stable: false,
+                lastChangeTime: Date.now()
+            };
+        }
+    });
 }
 
 // 페이지 로드 시 초기화

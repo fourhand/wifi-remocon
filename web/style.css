@@ -109,6 +109,23 @@ body {
     box-shadow: var(--shadow);
 }
 
+.device-card.pending {
+    border-color: var(--ochre);
+    background: linear-gradient(135deg, var(--bisque) 0%, #fff5e6 100%);
+    animation: pulse-border 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-border {
+    0%, 100% {
+        border-color: var(--ochre);
+        box-shadow: 0 0 0 0 rgba(204, 119, 34, 0.4);
+    }
+    50% {
+        border-color: var(--coral-clay);
+        box-shadow: 0 0 0 4px rgba(204, 119, 34, 0.1);
+    }
+}
+
 .device-header {
     display: flex;
     justify-content: space-between;
@@ -144,6 +161,39 @@ body {
     background: var(--maroon);
 }
 
+.status-indicator.pending-indicator {
+    background: var(--ochre);
+    animation: pulse-dot 1s ease-in-out infinite;
+    box-shadow: 0 0 6px var(--ochre);
+}
+
+@keyframes pulse-dot {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.6;
+        transform: scale(1.2);
+    }
+}
+
+.pending-text {
+    color: var(--ochre);
+    font-weight: 600;
+    font-size: 11px;
+    animation: blink 1.5s ease-in-out infinite;
+}
+
+@keyframes blink {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
 .device-info {
     display: flex;
     flex-direction: column;
@@ -167,6 +217,24 @@ body {
 
 .power-icon.off {
     color: var(--text-secondary);
+}
+
+.mode-badge {
+    font-size: 9px;
+    font-weight: 600;
+    padding: 2px 5px;
+    border-radius: 4px;
+    margin-left: 2px;
+}
+
+.mode-badge.mode-hot {
+    background: #ff6b6b;
+    color: white;
+}
+
+.mode-badge.mode-cool {
+    background: #4dabf7;
+    color: white;
 }
 
 .temp-display {
