@@ -1,12 +1,43 @@
-// 고정된 장치 순서
-const DEVICE_ORDER = [
-    'f3-ac-01',
-    'f3-ac-02',
-    'f3-ac-03',
-    'f3-ac-04',
-    'f4-ac-01',
-    'f4-ac-02'
+// 장치 배치 순서 (2열 3행 그리드)
+// 헤더: [강        단]
+// 행1: [ f3-ac-03 ][ f3-ac-01 ]  강, 단
+// 행2: [ f3-ac-04 ][ f3-ac-02 ]  강, 단
+// 행3: [ f4-ac-01 ][ f4-ac-02 ]  강, 단
+const DEVICE_GRID_ORDER = [
+    ['f3-ac-03', 'f3-ac-01'],  // 행1: 강, 단
+    ['f3-ac-04', 'f3-ac-02'],  // 행2: 강, 단
+    ['f4-ac-01', 'f4-ac-02']   // 행3: 강, 단
 ];
+
+// 장치 위치 설명
+const DEVICE_LOCATIONS = {
+    'f3-ac-01': '3층 악기 쪽',
+    'f3-ac-02': '3층 악기 쪽(뒤)',
+    'f3-ac-03': '3층 성가대 쪽',
+    'f3-ac-04': '3층 성가대 쪽(뒤)',
+    'f4-ac-01': '4층 악기 쪽',
+    'f4-ac-02': '4층 성가대 쪽'
+};
+
+// 층수 정보
+const DEVICE_FLOOR = {
+    'f3-ac-01': '3층',
+    'f3-ac-02': '3층',
+    'f3-ac-03': '3층',
+    'f3-ac-04': '3층',
+    'f4-ac-01': '4층',
+    'f4-ac-02': '4층'
+};
+
+// 강/단 위치 정보
+const DEVICE_POSITION = {
+    'f3-ac-01': '단',
+    'f3-ac-02': '단',
+    'f3-ac-03': '강',
+    'f3-ac-04': '강',
+    'f4-ac-01': '강',
+    'f4-ac-02': '단'
+};
 
 // 전역 상태
 let devices = [];
@@ -75,9 +106,10 @@ async function init() {
 // 장치 목록 로드
 async function loadDevices() {
     const allDevices = await api.getDevices();
+    const allDeviceIds = DEVICE_GRID_ORDER.flat();
     
     // 장치를 고정 순서로 정렬
-    devices = DEVICE_ORDER.map(id => {
+    devices = allDeviceIds.map(id => {
         const device = allDevices.find(d => d.id === id);
         // 새로 발견된 장치의 health 히스토리 초기화
         if (device && !healthHistory[id]) {
@@ -195,34 +227,58 @@ function updateHealthStability(deviceId, isHealthy) {
 
 // 상태 업데이트
 async function updateStatus() {
-    const statuses = await api.getAllStatus();
-    
-    // 상태를 객체로 변환하고 health 안정화 적용
-    deviceStatuses = {};
-    statuses.forEach(status => {
-        const rawHealthy = status?.health?.ok || false;
-        const stableHealthy = updateHealthStability(status.id, rawHealthy);
+    try {
+        const statuses = await api.getAllStatus();
         
-        // 안정화된 health 상태로 덮어쓰기
-        deviceStatuses[status.id] = {
-            ...status,
-            health: {
-                ...status.health,
-                ok: stableHealthy,
-                raw: rawHealthy // 원본 상태도 보관 (디버깅용)
-            }
-        };
-    });
-    
-    renderDevices();
+        // 상태를 객체로 변환하고 health 안정화 적용
+        deviceStatuses = {};
+        
+        // statuses가 배열인지 확인
+        if (!statuses || !Array.isArray(statuses)) {
+            // null이거나 배열이 아니면 빈 배열로 처리
+            console.warn('getAllStatus returned non-array:', statuses);
+            renderDevices();
+            return;
+        }
+        
+        statuses.forEach(status => {
+            const rawHealthy = status?.health?.ok || false;
+            const stableHealthy = updateHealthStability(status.id, rawHealthy);
+            
+            // 안정화된 health 상태로 덮어쓰기
+            deviceStatuses[status.id] = {
+                ...status,
+                health: {
+                    ...status.health,
+                    ok: stableHealthy,
+                    raw: rawHealthy // 원본 상태도 보관 (디버깅용)
+                }
+            };
+        });
+        
+        renderDevices();
+    } catch (error) {
+        console.error('Error in updateStatus:', error);
+        renderDevices();
+    }
 }
 
 // 장치 카드 렌더링
 function renderDevices() {
+    const devicesGrid = document.getElementById('devicesGrid');
     devicesGrid.innerHTML = '';
     
-    // 고정된 순서로 6개 장치 표시
-    DEVICE_ORDER.forEach(deviceId => {
+    // 2열 그리드로 렌더링
+    DEVICE_GRID_ORDER.forEach(row => {
+        row.forEach(deviceId => {
+            const card = createDeviceCard(deviceId);
+            if (card) devicesGrid.appendChild(card);
+        });
+    });
+}
+
+// 장치 카드 생성 함수
+function createDeviceCard(deviceId) {
         const device = devices.find(d => d.id === deviceId);
         const status = deviceStatuses[deviceId];
         const isHealthy = status?.health?.ok || false;
@@ -249,9 +305,14 @@ function renderDevices() {
             card.addEventListener('click', () => selectDevice(deviceId));
         }
         
+        const location = DEVICE_LOCATIONS[deviceId] || '';
+        const floor = DEVICE_FLOOR[deviceId] || '';
+        const cardMode = isOn && mode ? mode : null; // 카드 배경색용 모드
+        
         card.innerHTML = `
+            <div class="device-floor-badge">${floor}</div>
             <div class="device-header">
-                <div class="device-id">${deviceId}</div>
+                <div class="device-id">${deviceId} <span class="device-location-inline">${location}</span></div>
                 <div class="device-status">
                     ${isPending ? '<div class="status-indicator pending-indicator"></div>' : `<div class="status-indicator ${!hasIssue ? 'active' : 'inactive'}"></div>`}
                 </div>
@@ -265,9 +326,15 @@ function renderDevices() {
             </div>
         `;
         
-        devicesGrid.appendChild(card);
-    });
-}
+        // 모드에 따른 카드 배경색 클래스 추가
+        if (cardMode === 'hot') {
+            card.classList.add('mode-hot-bg');
+        } else if (cardMode === 'cool') {
+            card.classList.add('mode-cool-bg');
+        }
+        
+        return card;
+    }
 
 // 장치 선택 (단일)
 function selectDevice(deviceId) {
@@ -290,17 +357,28 @@ function selectDevice(deviceId) {
 
 // 모든 장치 선택
 function selectAllDevices() {
-    selectedDeviceIds = DEVICE_ORDER
-        .filter(deviceId => {
-            const device = devices.find(d => d.id === deviceId);
-            const status = deviceStatuses[deviceId];
-            const state = status?.state || null;
-            const hasTemp = state?.room_temp !== null && state?.room_temp !== undefined;
-            // 장치가 존재하고 온도 정보가 있으면 선택 가능
-            return device && device.ip && hasTemp;
-        });
+    const allDeviceIds = DEVICE_GRID_ORDER.flat();
     
-    // 첫 번째 장치의 상태로 제어 패널 초기화
+    // 장치 목록이 비어있으면 로드 먼저 시도
+    if (devices.length === 0) {
+        console.warn('장치 목록이 비어있습니다. 장치를 먼저 로드하세요.');
+        // 장치 목록을 다시 로드 시도
+        loadDevices().then(() => {
+            // 로드 후 다시 선택 시도
+            selectAllDevices();
+        });
+        return;
+    }
+    
+    // 모든 장치를 선택 (IP가 없어도 선택 가능 - 제어는 안 될 수 있지만 선택은 가능)
+    selectedDeviceIds = allDeviceIds.filter(deviceId => {
+        const device = devices.find(d => d.id === deviceId);
+        return device !== undefined; // 장치가 존재하면 선택
+    });
+    
+    console.log('전체 선택:', selectedDeviceIds.length, '개 선택됨. 전체 장치:', devices.length, '개'); // 디버깅용
+    
+    // 첫 번째 장치의 상태로 제어 패널 초기화 (상태가 있으면)
     if (selectedDeviceIds.length > 0) {
         const firstStatus = deviceStatuses[selectedDeviceIds[0]];
         const state = firstStatus?.state;
@@ -312,8 +390,10 @@ function selectAllDevices() {
             currentCommand.fan = state.fan || 'auto';
             currentCommand.swing = state.swing ? 'on' : 'off';
         }
+        // 상태가 없어도 기본값은 이미 currentCommand에 있음
     }
     
+    // 제어 패널 업데이트 (선택된 장치 정보 표시) - 반드시 호출
     updateControlPanel();
     renderDevices();
 }
@@ -341,7 +421,7 @@ function updateControlPanel() {
     } else if (selectedDeviceIds.length === 1) {
         selectedDeviceText.textContent = `선택: ${selectedDeviceIds[0]}`;
     } else {
-        selectedDeviceText.textContent = `선택: 전체 (${selectedDeviceIds.length}개)`;
+        selectedDeviceText.textContent = '전체선택';
     }
     
     // 설정 저장
@@ -396,7 +476,8 @@ function setupEventListeners() {
     // 전체 켜기/끄기 (빠른 제어용 - 제어 패널 열지 않음)
     allOnBtn.addEventListener('click', async () => {
         // 온도 정보가 있는 장치를 진행중으로 표시
-        DEVICE_ORDER.forEach(deviceId => {
+        const allDeviceIds = DEVICE_GRID_ORDER.flat();
+        allDeviceIds.forEach(deviceId => {
             const device = devices.find(d => d.id === deviceId);
             const status = deviceStatuses[deviceId];
             const state = status?.state || null;
@@ -421,7 +502,8 @@ function setupEventListeners() {
     
     allOffBtn.addEventListener('click', async () => {
         // 온도 정보가 있는 장치를 진행중으로 표시
-        DEVICE_ORDER.forEach(deviceId => {
+        const allDeviceIds = DEVICE_GRID_ORDER.flat();
+        allDeviceIds.forEach(deviceId => {
             const device = devices.find(d => d.id === deviceId);
             const status = deviceStatuses[deviceId];
             const state = status?.state || null;
@@ -515,13 +597,24 @@ function setupEventListeners() {
         
         const command = { ...currentCommand };
         
-        // 선택된 모든 장치에 명령 전송
-        for (const deviceId of selectedDeviceIds) {
-            const result = await api.setDevice(deviceId, command);
-            // 각 장치별로 완료되면 진행중 상태 해제
-            pendingDevices.delete(deviceId);
-            renderDevices();
-        }
+        // 선택된 모든 장치에 병렬로 명령 전송
+        const promises = selectedDeviceIds.map(async (deviceId) => {
+            try {
+                const result = await api.setDevice(deviceId, command);
+                // 완료되면 진행중 상태 해제
+                pendingDevices.delete(deviceId);
+                renderDevices();
+                return { deviceId, result, success: true };
+            } catch (error) {
+                // 실패해도 진행중 상태 해제
+                pendingDevices.delete(deviceId);
+                renderDevices();
+                return { deviceId, error, success: false };
+            }
+        });
+        
+        // 모든 요청이 완료될 때까지 대기
+        await Promise.all(promises);
         
         await updateStatus();
     });
@@ -535,7 +628,8 @@ function startAutoRefresh() {
     }, 5000); // 5초마다 업데이트
     
     // 초기 health 히스토리 초기화
-    DEVICE_ORDER.forEach(deviceId => {
+    const allDeviceIds = DEVICE_GRID_ORDER.flat();
+    allDeviceIds.forEach(deviceId => {
         if (!healthHistory[deviceId]) {
             healthHistory[deviceId] = {
                 recent: [],

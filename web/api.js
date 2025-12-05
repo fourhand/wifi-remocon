@@ -19,8 +19,13 @@ const api = {
     async getAllStatus() {
         try {
             const response = await fetch(`${API_BASE_URL}/devices/status`);
-            if (!response.ok) throw new Error('Failed to fetch status');
-            return await response.json();
+            if (!response.ok) {
+                console.error('Failed to fetch status:', response.status, response.statusText);
+                return [];
+            }
+            const data = await response.json();
+            // null이나 undefined인 경우 빈 배열 반환
+            return Array.isArray(data) ? data : [];
         } catch (error) {
             console.error('Error fetching status:', error);
             return [];

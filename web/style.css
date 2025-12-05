@@ -64,13 +64,45 @@ body {
     color: var(--text-primary);
 }
 
-/* 장치 그리드 */
-.devices-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
+/* 장치 컨테이너 */
+.devices-container {
+    display: flex;
+    flex-direction: column;
     gap: 6px;
     margin-bottom: 8px;
     flex-shrink: 0;
+}
+
+/* 장치 헤더 (강/단 표시) */
+.devices-header {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+.column-header {
+    text-align: center;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    padding: 4px;
+    background: var(--bisque);
+    border-radius: 4px;
+}
+
+/* 장치 그리드 (2열 3행) */
+.devices-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr !important; /* 2열 고정 */
+    grid-template-rows: repeat(3, auto); /* 3행 고정 */
+    grid-auto-flow: row; /* 행 방향으로 배치 */
+    gap: 6px;
+    width: 100%;
+    max-width: 100%;
+}
+
+.devices-grid > * {
+    max-width: 100%;
 }
 
 .device-card {
@@ -80,12 +112,46 @@ body {
     box-shadow: var(--shadow);
     cursor: pointer;
     transition: all 0.2s;
-    border: 2px solid transparent;
+    border: 2px solid #e0e0e0;
     position: relative;
     min-height: 70px;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    padding-left: 28px; /* 층수 배지를 위한 공간 */
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+}
+
+.device-floor-badge {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 20px;
+    background: var(--terracotta);
+    border-radius: 8px 0 0 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    font-size: 10px;
+    font-weight: 700;
+    color: white;
+    letter-spacing: 1px;
+}
+
+
+.device-card.mode-hot-bg {
+    background: linear-gradient(135deg, #fff5f5 0%, #ffe0e0 100%);
+    border-color: #ff6b6b;
+}
+
+.device-card.mode-cool-bg {
+    background: linear-gradient(135deg, #f0f8ff 0%, #e0f2ff 100%);
+    border-color: #4dabf7;
 }
 
 .device-card:hover {
@@ -96,6 +162,18 @@ body {
 .device-card.selected {
     border-color: var(--terracotta);
     background: var(--bisque);
+    border-width: 3px;
+    box-shadow: 0 0 0 2px rgba(226, 114, 91, 0.3);
+}
+
+.device-card.selected.mode-hot-bg {
+    background: linear-gradient(135deg, #ffe0e0 0%, #ffcccc 100%);
+    border-color: #ff6b6b;
+}
+
+.device-card.selected.mode-cool-bg {
+    background: linear-gradient(135deg, #e0f2ff 0%, #cce6ff 100%);
+    border-color: #4dabf7;
 }
 
 .device-card.disabled {
@@ -137,6 +215,24 @@ body {
     font-weight: 600;
     font-size: 12px;
     color: var(--text-primary);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.device-location {
+    font-size: 9px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    font-weight: 500;
+}
+
+.device-location-inline {
+    font-size: 9px;
+    color: var(--text-secondary);
+    font-weight: 400;
+    display: block;
+    margin-top: 2px;
 }
 
 .device-status {
@@ -356,20 +452,21 @@ body {
 .toggle-btn {
     flex: 1;
     padding: 8px 4px;
-    border: 1px solid var(--border-color);
-    background: white;
+    border: 2px solid #d0d0d0;
+    background: #f5f5f5;
     border-radius: 6px;
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
-    color: var(--text-primary);
+    color: #666;
 }
 
 .toggle-btn.active {
     background: var(--terracotta);
     color: white;
     border-color: var(--terracotta);
+    box-shadow: 0 2px 4px rgba(226, 114, 91, 0.3);
 }
 
 .toggle-btn:not(.active):hover {
@@ -431,20 +528,21 @@ body {
 
 .btn-option {
     padding: 6px 4px;
-    border: 1px solid var(--border-color);
-    background: white;
+    border: 2px solid #d0d0d0;
+    background: #f5f5f5;
     border-radius: 6px;
     font-size: 11px;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
-    color: var(--text-primary);
+    color: #666;
 }
 
 .btn-option.active {
     background: var(--terracotta);
     color: white;
     border-color: var(--terracotta);
+    box-shadow: 0 2px 4px rgba(226, 114, 91, 0.3);
 }
 
 .btn-option:not(.active):hover {
@@ -472,10 +570,18 @@ body {
     transition: all 0.2s;
     background: var(--terracotta);
     color: white;
+    box-shadow: 0 2px 4px rgba(226, 114, 91, 0.3);
 }
 
 .btn-apply:hover {
     background: var(--maroon);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(44, 24, 16, 0.3);
+}
+
+.btn-apply:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(44, 24, 16, 0.2);
 }
 
 /* 반응형 디자인 */

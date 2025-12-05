@@ -114,11 +114,40 @@ def get_device(device_id: str) -> Dict[str, Any]:
 
 
 def send_ac_command(dev: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
-    """GET 요청으로 명령 전달"""
+    """GET 요청으로 명령 전달 (500ms 간격으로 7번 연속 전송)"""
     try:
         url = f"http://{dev['ip']}:{dev['port']}{HTTP_PATH_SET}"
-        resp = requests.get(url, params=params, timeout=HTTP_TIMEOUT)
-        return {"ok": resp.ok, "status_code": resp.status_code, "body": resp.text}
+        results = []
+        
+        # 500ms 간격으로 7번 연속 전송
+        for i in range(7):
+            try:
+                resp = requests.get(url, params=params, timeout=HTTP_TIMEOUT)
+                results.append({
+                    "ok": resp.ok,
+                    "status_code": resp.status_code,
+                    "attempt": i + 1
+                })
+            except Exception as e:
+                results.append({
+                    "ok": False,
+                    "error": str(e),
+                    "attempt": i + 1
+                })
+            
+            # 마지막 시도가 아니면 500ms 대기
+            if i < 6:
+                time.sleep(0.5)
+        
+        # 마지막 결과 반환
+        last_result = results[-1] if results else {"ok": False, "error": "No attempts made"}
+        return {
+            "ok": last_result.get("ok", False),
+            "status_code": last_result.get("status_code", 0),
+            "body": last_result.get("body", ""),
+            "attempts": len(results),
+            "all_results": results
+        }
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
