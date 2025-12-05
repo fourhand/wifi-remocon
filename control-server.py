@@ -17,9 +17,11 @@ import os
 
 try:
     from zeroconf import ServiceInfo, Zeroconf
+    from zeroconf._exceptions import NonUniqueNameException
     ZEROCONF_AVAILABLE = True
 except ImportError:
     ZEROCONF_AVAILABLE = False
+    NonUniqueNameException = None
     print("[경고] zeroconf가 설치되지 않았습니다. mDNS 기능을 사용할 수 없습니다.")
     print("      설치: pip install zeroconf")
 
@@ -388,27 +390,45 @@ def register_mdns():
             server=f"{MDNS_HOSTNAME}.local.",
         )
         
-        # 서비스 등록
-        zeroconf.register_service(service_info)
-        
-        # Windows에서 mDNS가 제대로 동작하는지 확인하기 위해 약간 대기
-        time.sleep(0.5)
-        
-        print(f"[mDNS] ✓ Service registered successfully")
-        print(f"[mDNS]   http://{MDNS_HOSTNAME}.local:{SERVER_PORT}/")
-        print(f"[mDNS]   http://{primary_ip}:{SERVER_PORT}/")
-        print(f"[mDNS]")
-        print(f"[mDNS]   ⚠ Windows에서 mDNS(.local) 접속이 안 될 수 있습니다.")
-        print(f"[mDNS]   이 경우 IP 주소로 직접 접속하세요: http://{primary_ip}:{SERVER_PORT}/")
-        print(f"[mDNS]   또는 hosts 파일에 추가: {primary_ip}  {MDNS_HOSTNAME}.local")
-        return True
+        # 서비스 등록 시도
+        try:
+            zeroconf.register_service(service_info)
+            # Windows에서 mDNS가 제대로 동작하는지 확인하기 위해 약간 대기
+            time.sleep(0.5)
+            
+            print(f"[mDNS] ✓ Service registered successfully")
+            print(f"[mDNS]   http://{MDNS_HOSTNAME}.local:{SERVER_PORT}/")
+            print(f"[mDNS]   http://{primary_ip}:{SERVER_PORT}/")
+            print(f"[mDNS]")
+            print(f"[mDNS]   ⚠ Windows에서 mDNS(.local) 접속이 안 될 수 있습니다.")
+            print(f"[mDNS]   이 경우 IP 주소로 직접 접속하세요: http://{primary_ip}:{SERVER_PORT}/")
+            print(f"[mDNS]   또는 hosts 파일에 추가: {primary_ip}  {MDNS_HOSTNAME}.local")
+            return True
+        except NonUniqueNameException:
+            # 같은 이름의 서비스가 이미 등록된 경우
+            print(f"[mDNS] ⚠ Service name already exists, attempting to unregister and re-register...")
+            try:
+                # 이전 서비스 해제 시도
+                zeroconf.unregister_service(service_info)
+                time.sleep(0.5)
+                # 다시 등록
+                zeroconf.register_service(service_info)
+                time.sleep(0.5)
+                print(f"[mDNS] ✓ Service re-registered successfully")
+                print(f"[mDNS]   http://{MDNS_HOSTNAME}.local:{SERVER_PORT}/")
+                print(f"[mDNS]   http://{primary_ip}:{SERVER_PORT}/")
+                return True
+            except Exception as e2:
+                print(f"[mDNS] ⚠ Could not re-register service: {e2}")
+                print(f"[mDNS]   서버는 정상 작동하지만 mDNS를 통한 자동 발견이 안 될 수 있습니다.")
+                print(f"[mDNS]   IP 주소로 직접 접속하세요: http://{primary_ip}:{SERVER_PORT}/")
+                return False
         
     except Exception as e:
         print(f"[mDNS] ✗ Failed to register service: {e}")
-        import traceback
-        traceback.print_exc()
+        # traceback은 너무 길어서 간단한 메시지만 출력
         primary_ip = get_local_ips()[0] if get_local_ips() else "localhost"
-        print(f"[mDNS]   Windows에서 mDNS가 동작하지 않을 수 있습니다.")
+        print(f"[mDNS]   서버는 정상 작동하지만 mDNS를 통한 자동 발견이 안 될 수 있습니다.")
         print(f"[mDNS]   IP 주소로 직접 접속하세요: http://{primary_ip}:{SERVER_PORT}/")
         return False
 
