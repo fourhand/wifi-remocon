@@ -186,6 +186,11 @@ def get_all_status():
             "state": state_result.get("state") if state_result.get("ok") else None,
         }
         status_list.append(status)
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    subprocess.call(["./deploy.sh"])
+    return "OK", 200
     
     return status_list
 
