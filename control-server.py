@@ -48,6 +48,47 @@ HTTP_TIMEOUT = 2.0
 ALL_CMD_PER_DEVICE_TIMEOUT_SEC = int(os.getenv("ALL_CMD_PER_DEVICE_TIMEOUT_SEC", "10"))
 
 # ========================
+# 액션 로그 설정 (용량 제한 로테이션)
+# ========================
+LOG_DIR = os.path.join(os.path.dirname(__file__), "logs")
+ACTION_LOG_PATH = os.path.join(LOG_DIR, "actions.log")
+ACTION_LOG_MAX_BYTES = int(os.getenv("ACTION_LOG_MAX_BYTES", str(1 * 1024 * 1024)))  # 1MB
+ACTION_LOG_BACKUP_COUNT = int(os.getenv("ACTION_LOG_BACKUP_COUNT", "5"))
+
+def _setup_action_logger() -> logging.Logger:
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
+    except Exception:
+        pass
+    logger = logging.getLogger("actions")
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        try:
+            handler = RotatingFileHandler(
+                ACTION_LOG_PATH, maxBytes=ACTION_LOG_MAX_BYTES, backupCount=ACTION_LOG_BACKUP_COUNT, encoding="utf-8"
+            )
+            handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            logger.addHandler(handler)
+        except Exception as e:
+            stream = logging.StreamHandler()
+            stream.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            logger.addHandler(stream)
+            logger.info(f"[ActionLog] handler setup failed: {e}")
+    return logger
+
+action_logger = _setup_action_logger()
+
+def write_action_log(event: str, data: dict):
+    try:
+        msg = json.dumps({"event": event, **(data or {})}, ensure_ascii=False)
+    except Exception:
+        msg = f"{event} {data}"
+    try:
+        action_logger.info(msg)
+    except Exception:
+        pass
+
+# ========================
 # 시계 동기화 설정
 # ========================
 TIME_SYNC_ENABLED = os.getenv("TIME_SYNC_ENABLED", "1").lower() in ("1", "true", "yes")
@@ -416,6 +457,7 @@ def _schedule_loop():
                     key = (sid, "on")
                     if schedule_last_sent.get(key) != now_min:
                         print(f"[Schedule] #{sid} ON dispatch (mode={sch['mode']} temp={sch['temp']})")
+                        write_action_log("schedule_on", {"schedule_id": sid, "mode": sch["mode"], "temp": sch["temp"], "time_min": now_min})
                         _schedule_send_on(sch["mode"], sch["temp"])
                         schedule_last_sent[key] = now_min
 
@@ -423,12 +465,14 @@ def _schedule_loop():
                     key = (sid, "off")
                     if schedule_last_sent.get(key) != now_min:
                         print(f"[Schedule] #{sid} OFF dispatch")
+                        write_action_log("schedule_off", {"schedule_id": sid, "time_min": now_min})
                         _schedule_send_off()
                         schedule_last_sent[key] = now_min
                         # 1회 예약은 OFF 실행 후 비활성화
                         if st == "once":
                             try:
                                 update_schedule(sid, ScheduleUpdate(enabled=False))
+                                write_action_log("schedule_once_disabled", {"schedule_id": sid})
                                 print(f"[Schedule] #{sid} once disabled after OFF")
                             except Exception as _e:
                                 print(f"[Schedule] #{sid} disable failed: {_e}")
@@ -661,7 +705,7 @@ def time_sync_now():
         return {"ok": False, "result": result}
     return {"ok": True, "result": result}
 
-@app.route("/webhook", methods=["POST"])
+@app.post("/webhook", status_code=202)
 def webhook():
     try:
         # 비차단 방식으로 배포 스크립트 실행 (실행 권한 불필요)
@@ -670,7 +714,7 @@ def webhook():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        return {"ok": True, "message": "Deployment started"}, 202
+        return {"ok": True, "message": "Deployment started"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -681,7 +725,12 @@ def set_ac(device_id: str, cmd: AcCommand):
     params = {k: v for k, v in cmd.dict().items() if v is not None}
     if not params:
         raise HTTPException(status_code=400, detail="No parameters given")
+    write_action_log("user_set_ac", {"device_id": device_id, "params": params})
     result = send_ac_command(dev, params)
+    try:
+        write_action_log("user_set_ac_result", {"device_id": device_id, "ok": result.get("ok", False), "status_code": result.get("status_code", 0)})
+    except Exception:
+        pass
     return {"device": dev["id"], "ip": dev["ip"], "params": params, "result": result}
 
 @app.post("/devices/batch/ac/set")
@@ -719,6 +768,13 @@ def set_ac_batch(payload: BatchAcCommand):
     if not target_devs:
         return {"command": params, "results": results, "missing": missing, "requested_ids": unique_ids}
 
+    write_action_log("user_set_ac_batch", {
+        "requested_ids": unique_ids,
+        "params": params,
+        "target_ids": [d["id"] for d in target_devs],
+        "missing": missing
+    })
+
     max_workers = min(16, max(1, len(target_devs)))
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     try:
@@ -751,6 +807,12 @@ def set_ac_batch(payload: BatchAcCommand):
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
 
+    try:
+        ok_cnt = sum(1 for v in results.values() if v.get("ok"))
+        write_action_log("user_set_ac_batch_result", {"ok_count": ok_cnt, "total": len(results)})
+    except Exception:
+        pass
+
     return {"command": params, "results": results, "missing": missing, "requested_ids": unique_ids}
 
 
@@ -761,6 +823,7 @@ def all_on(cmd: AcCommand | None = None):
         for k, v in cmd.dict().items():
             if v is not None:
                 base[k] = v
+    write_action_log("user_all_on", {"command": base})
     cleanup_devices()
     with devices_lock:
         devs = list(devices.values())
@@ -807,6 +870,12 @@ def all_on(cmd: AcCommand | None = None):
         # 대기하지 않고 종료, 실행 중인 작업은 가능한 한 취소 시도
         executor.shutdown(wait=False, cancel_futures=True)
 
+    try:
+        ok_cnt = sum(1 for v in results.values() if v.get("ok"))
+        write_action_log("user_all_on_result", {"ok_count": ok_cnt, "total": len(results)})
+    except Exception:
+        pass
+
     return {"command": base, "results": results}
 
 
@@ -814,6 +883,7 @@ def all_on(cmd: AcCommand | None = None):
 def all_off():
     # power=off만 전송하여 각 모듈의 기존 모드/온도 값은 유지
     params = {"power": "off"}
+    write_action_log("user_all_off", {})
     cleanup_devices()
     with devices_lock:
         devs = list(devices.values())
@@ -853,6 +923,12 @@ def all_off():
             results[dev_id] = {"ok": False, "error": "timeout", "timeout_sec": ALL_CMD_PER_DEVICE_TIMEOUT_SEC}
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
+
+    try:
+        ok_cnt = sum(1 for v in results.values() if v.get("ok"))
+        write_action_log("user_all_off_result", {"ok_count": ok_cnt, "total": len(results)})
+    except Exception:
+        pass
 
     return {"command": params, "results": results}
 
