@@ -5,6 +5,7 @@ import socket
 import json
 import time
 from typing import Dict, Any
+import concurrent.futures
 
 import requests
 from fastapi import FastAPI, HTTPException
@@ -41,6 +42,8 @@ MDNS_SERVICE_TYPE = "_http._tcp.local."
 
 HTTP_PATH_SET = "/ac/set"    # ESP8266 코드에 맞춤
 HTTP_TIMEOUT = 2.0
+# 전체 제어 시, 장치별 최대 대기 시간(초) - 초과 시 타임아웃으로 처리
+ALL_CMD_PER_DEVICE_TIMEOUT_SEC = int(os.getenv("ALL_CMD_PER_DEVICE_TIMEOUT_SEC", "10"))
 
 # ========================
 # 시계 동기화 설정
@@ -108,6 +111,10 @@ class AcCommand(BaseModel):
     temp: int | None = None
     fan: str | None = None
     swing: str | None = None
+
+class BatchAcCommand(BaseModel):
+    device_ids: list[str]
+    command: AcCommand
 
 
 def cleanup_devices():
@@ -353,6 +360,75 @@ def set_ac(device_id: str, cmd: AcCommand):
     result = send_ac_command(dev, params)
     return {"device": dev["id"], "ip": dev["ip"], "params": params, "result": result}
 
+@app.post("/devices/batch/ac/set")
+def set_ac_batch(payload: BatchAcCommand):
+    # 유효성 검사
+    ids = [i for i in (payload.device_ids or []) if i]
+    # 중복 제거(순서 유지)
+    seen = set()
+    unique_ids: list[str] = []
+    for i in ids:
+        if i not in seen:
+            seen.add(i)
+            unique_ids.append(i)
+    params = {k: v for k, v in payload.command.dict().items() if v is not None}
+    if not unique_ids:
+        raise HTTPException(status_code=400, detail="No device_ids given")
+    if not params:
+        raise HTTPException(status_code=400, detail="No parameters given")
+
+    cleanup_devices()
+    with devices_lock:
+        dev_map = dict(devices)
+
+    # 대상 장치 분류
+    target_devs: list[Dict[str, Any]] = []
+    missing: list[str] = []
+    for dev_id in unique_ids:
+        dev = dev_map.get(dev_id)
+        if dev:
+            target_devs.append(dev)
+        else:
+            missing.append(dev_id)
+
+    results: Dict[str, Dict[str, Any]] = {}
+    if not target_devs:
+        return {"command": params, "results": results, "missing": missing, "requested_ids": unique_ids}
+
+    max_workers = min(16, max(1, len(target_devs)))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        future_to_id: Dict[concurrent.futures.Future, str] = {}
+        for dev in target_devs:
+            fut = executor.submit(send_ac_command, dev, params)
+            future_to_id[fut] = dev["id"]
+
+        done, not_done = concurrent.futures.wait(
+            list(future_to_id.keys()),
+            timeout=ALL_CMD_PER_DEVICE_TIMEOUT_SEC,
+            return_when=concurrent.futures.ALL_COMPLETED
+        )
+
+        for fut in list(done):
+            dev_id = future_to_id.get(fut)
+            if dev_id is None:
+                continue
+            try:
+                results[dev_id] = fut.result()
+            except Exception as e:
+                results[dev_id] = {"ok": False, "error": str(e)}
+
+        for fut in list(not_done):
+            dev_id = future_to_id.get(fut)
+            if dev_id is None:
+                continue
+            fut.cancel()
+            results[dev_id] = {"ok": False, "error": "timeout", "timeout_sec": ALL_CMD_PER_DEVICE_TIMEOUT_SEC}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    return {"command": params, "results": results, "missing": missing, "requested_ids": unique_ids}
+
 
 @app.post("/all/on")
 def all_on(cmd: AcCommand | None = None):
@@ -365,9 +441,48 @@ def all_on(cmd: AcCommand | None = None):
     with devices_lock:
         devs = list(devices.values())
 
-    results = {}
-    for dev in devs:
-        results[dev["id"]] = send_ac_command(dev, base)
+    # 장치별 명령을 병렬 전송 (쓰레드) + per-device 타임아웃
+    results: Dict[str, Dict[str, Any]] = {}
+    if not devs:
+        return {"command": base, "results": results}
+
+    max_workers = min(16, max(1, len(devs)))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        future_to_id: Dict[concurrent.futures.Future, str] = {}
+        for dev in devs:
+            fut = executor.submit(send_ac_command, dev, base)
+            future_to_id[fut] = dev["id"]
+
+        # 지정된 타임아웃 동안 완료된 작업만 수집
+        done, not_done = concurrent.futures.wait(
+            list(future_to_id.keys()),
+            timeout=ALL_CMD_PER_DEVICE_TIMEOUT_SEC,
+            return_when=concurrent.futures.ALL_COMPLETED
+        )
+
+        # 이미 끝난 작업은 결과 수집
+        for fut in list(done):
+            dev_id = future_to_id.get(fut)
+            if dev_id is None:
+                continue
+            try:
+                results[dev_id] = fut.result()
+            except Exception as e:
+                results[dev_id] = {"ok": False, "error": str(e)}
+
+        # 타임아웃된 작업은 timeout으로 표기
+        # 추가로 취소 시도 (이미 실행 중인 작업은 취소되지 않을 수 있음)
+        for fut in list(not_done):
+            dev_id = future_to_id.get(fut)
+            if dev_id is None:
+                continue
+            fut.cancel()
+            results[dev_id] = {"ok": False, "error": "timeout", "timeout_sec": ALL_CMD_PER_DEVICE_TIMEOUT_SEC}
+    finally:
+        # 대기하지 않고 종료, 실행 중인 작업은 가능한 한 취소 시도
+        executor.shutdown(wait=False, cancel_futures=True)
+
     return {"command": base, "results": results}
 
 
@@ -593,6 +708,16 @@ if __name__ == "__main__":
         mdns_success = register_mdns()
         if not mdns_success:
             print("[mDNS] mDNS 등록에 실패했지만 서버는 계속 실행됩니다.")
+        
+        # 추가 접근 안내: 로컬 IP 및 mDNS 주소 출력
+        try:
+            local_ips = get_local_ips()
+            primary_ip = local_ips[0] if local_ips else "127.0.0.1"
+            print("[Access] 다음 주소로 접속 가능합니다:")
+            print(f"[Access]   http://{primary_ip}:{SERVER_PORT}/")
+            print(f"[Access]   http://{MDNS_HOSTNAME}.local:{SERVER_PORT}/ (mDNS)")
+        except Exception as _:
+            pass
         
         print("Press Ctrl+C to stop the server")
         

@@ -26,6 +26,16 @@
     --border-color: #D4A574;
     --shadow: 0 1px 3px rgba(44, 24, 16, 0.15);
     --shadow-hover: 0 2px 6px rgba(44, 24, 16, 0.2);
+    
+    /* 테마 액센트 (기본: 난방 톤) */
+    --accent-color: var(--terracotta);
+    --accent-hover: var(--maroon);
+}
+
+/* 냉방 테마 */
+body.theme-cool {
+    --accent-color: #4dabf7;
+    --accent-hover: #1e6bd9;
 }
 
 body {
@@ -62,6 +72,16 @@ body {
     margin: 0 0 8px 0;
     text-align: center;
     color: var(--text-primary);
+    padding-bottom: 6px;
+}
+
+.header h1::after {
+    content: "";
+    display: block;
+    height: 3px;
+    margin-top: 6px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--terracotta), var(--moss));
 }
 
 /* 장치 컨테이너 */
@@ -71,6 +91,10 @@ body {
     gap: 6px;
     margin-bottom: 8px;
     flex-shrink: 0;
+    background: #fff8f3; /* 미묘한 구분 배경 */
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 6px;
 }
 
 /* 장치 헤더 (강/단 표시) */
@@ -114,7 +138,7 @@ body {
     transition: all 0.2s;
     border: 2px solid #e0e0e0;
     position: relative;
-    min-height: 70px;
+    min-height: 58px; /* 높이 축소 */
     display: flex;
     flex-direction: column;
     justify-content: space-between;
@@ -141,6 +165,14 @@ body {
     font-weight: 700;
     color: white;
     letter-spacing: 1px;
+}
+
+/* 운전 모드에 따른 층 배지 색상 */
+.device-card.mode-hot-bg .device-floor-badge {
+    background: #ff6b6b; /* 난방: 기존 느낌 유지 (따뜻한 톤) */
+}
+.device-card.mode-cool-bg .device-floor-badge {
+    background: #4dabf7; /* 냉방: 시원한 블루 톤 */
 }
 
 
@@ -220,6 +252,19 @@ body {
     gap: 2px;
 }
 
+.device-location-strong {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+
+.device-id-inline {
+    font-size: 9px;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
 .device-location {
     font-size: 9px;
     color: var(--text-secondary);
@@ -290,10 +335,17 @@ body {
     }
 }
 
-.device-info {
+.device-info { /* 기본은 남겨두되, 행 레이아웃 클래스로 제어 */
     display: flex;
     flex-direction: column;
     gap: 2px;
+}
+
+.device-info-row {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
 }
 
 .power-status {
@@ -334,14 +386,36 @@ body {
 }
 
 .temp-display {
-    font-size: 20px;
+    font-size: 18px; /* 약간 축소 */
     font-weight: 600;
     color: var(--terracotta);
     line-height: 1;
 }
 
+.temp-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+.temp-line {
+    display: flex;
+    align-items: baseline;
+    gap: 3px;
+}
 .temp-label {
-    font-size: 9px;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+.temp-value {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--terracotta);
+    line-height: 1;
+}
+.temp-suffix {
+    font-size: 10px;
     color: var(--text-secondary);
 }
 
@@ -402,16 +476,39 @@ body {
     min-height: 0;
     display: flex;
     flex-direction: column;
+    /* 하단 주소창/안전영역에 가리지 않도록 여유 공간 */
+    padding-bottom: calc(80px + env(safe-area-inset-bottom));
 }
 
 .panel-header {
     display: flex;
-    justify-content: flex-start;
+    justify-content: space-between;
     align-items: center;
     margin-bottom: 10px;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
+}
+
+.pager-tabs {
+    display: flex;
+    gap: 6px;
+}
+.pager-tab {
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: #fffdf9;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+.pager-tab.active {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
 }
 
 .panel-header h2 {
@@ -429,6 +526,44 @@ body {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+}
+
+.control-pager {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    gap: 0;
+}
+.control-pager::-webkit-scrollbar {
+    height: 6px;
+}
+.control-page {
+    min-width: 100%;
+    scroll-snap-align: start;
+    padding-right: 2px; /* 미세 간격 */
+    box-sizing: border-box;
+}
+
+.control-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.control-card {
+    border: 2px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px;
+    background: #fffdf9;
+    box-shadow: 0 1px 4px rgba(44, 24, 16, 0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.control-card .control-item {
+    margin: 0;
 }
 
 .control-item {
@@ -463,15 +598,15 @@ body {
 }
 
 .toggle-btn.active {
-    background: var(--terracotta);
+    background: var(--accent-color);
     color: white;
-    border-color: var(--terracotta);
-    box-shadow: 0 2px 4px rgba(226, 114, 91, 0.3);
+    border-color: var(--accent-color);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
 }
 
 .toggle-btn:not(.active):hover {
-    border-color: var(--primary-color);
-    color: var(--primary-color);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
 }
 
 /* 온도 제어 */
@@ -488,12 +623,12 @@ body {
 .btn-temp {
     width: 32px;
     height: 32px;
-    border: 1px solid var(--terracotta);
+    border: 1px solid var(--accent-color);
     background: white;
     border-radius: 50%;
     font-size: 20px;
     font-weight: 600;
-    color: var(--terracotta);
+    color: var(--accent-color);
     cursor: pointer;
     transition: all 0.2s;
     display: flex;
@@ -503,7 +638,7 @@ body {
 }
 
 .btn-temp:hover {
-    background: var(--terracotta);
+    background: var(--accent-color);
     color: white;
 }
 
@@ -514,9 +649,14 @@ body {
 #tempValue {
     font-size: 24px;
     font-weight: 700;
-    color: var(--terracotta);
+    color: var(--accent-color);
     min-width: 40px;
     text-align: center;
+}
+
+/* 냉방 테마에서 설정 온도 배경을 시원한 색으로 */
+body.theme-cool .temp-control {
+    background: #e0f2ff;
 }
 
 /* 옵션 버튼 그룹 */
@@ -539,15 +679,15 @@ body {
 }
 
 .btn-option.active {
-    background: var(--terracotta);
+    background: var(--accent-color);
     color: white;
-    border-color: var(--terracotta);
-    box-shadow: 0 2px 4px rgba(226, 114, 91, 0.3);
+    border-color: var(--accent-color);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
 }
 
 .btn-option:not(.active):hover {
-    border-color: var(--primary-color);
-    color: var(--primary-color);
+    border-color: var(--accent-color);
+    color: var(--accent-color);
 }
 
 /* 적용 버튼 */
@@ -558,6 +698,11 @@ body {
     padding-top: 8px;
     border-top: 1px solid var(--border-color);
     flex-shrink: 0;
+    position: sticky;
+    bottom: 0;
+    background: var(--card-bg);
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+    z-index: 10;
 }
 
 .btn-apply {
@@ -568,15 +713,15 @@ body {
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s;
-    background: var(--terracotta);
+    background: var(--accent-color);
     color: white;
-    box-shadow: 0 2px 4px rgba(226, 114, 91, 0.3);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
 }
 
 .btn-apply:hover {
-    background: var(--maroon);
+    background: var(--accent-hover);
     transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(44, 24, 16, 0.3);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.18);
 }
 
 .btn-apply:active {
@@ -596,6 +741,11 @@ body {
     }
 }
 
+@media (max-width: 520px) {
+    .control-cards {
+        grid-template-columns: 1fr;
+    }
+}
 /* 스크롤바 스타일 */
 .control-panel::-webkit-scrollbar {
     width: 6px;

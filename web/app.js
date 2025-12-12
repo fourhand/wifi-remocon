@@ -34,6 +34,7 @@ let devices = [];
 let deviceStatuses = {};
 let selectedDeviceIds = []; // 여러 장치 선택 가능
 let pendingDevices = new Set(); // 진행중인 장치 목록
+const GLOBAL_ACTION_TIMEOUT_MS = 10000; // 전체 제어/적용 시 최대 대기 시간
 
 // Health 상태 안정화를 위한 히스토리 관리
 const healthHistory = {}; // { deviceId: { recent: [{healthy, timestamp}], stable: true/false, lastChangeTime } }
@@ -82,6 +83,16 @@ const allOnBtn = document.getElementById('allOnBtn');
 const allOffBtn = document.getElementById('allOffBtn');
 const applyBtn = document.getElementById('applyBtn');
 
+function setActionButtonsDisabled(disabled) {
+    try {
+        if (allOnBtn) allOnBtn.disabled = disabled;
+        if (allOffBtn) allOffBtn.disabled = disabled;
+        if (applyBtn) applyBtn.disabled = disabled;
+    } catch (e) {
+        console.warn('setActionButtonsDisabled failed:', e);
+    }
+}
+
 // 초기화
 async function init() {
     // 저장된 설정으로 제어 패널 초기화
@@ -89,6 +100,8 @@ async function init() {
     
     await loadDevices();
     await updateStatus();
+    // 기본 선택: 전체 선택
+    selectAllDevices();
     setupEventListeners();
     startAutoRefresh();
 }
@@ -277,6 +290,9 @@ function createDeviceCard(deviceId) {
         const roomTemp = state?.room_temp !== null && state?.room_temp !== undefined 
             ? parseFloat(state.room_temp).toFixed(1) 
             : '--';
+        const setTemp = state?.temp !== null && state?.temp !== undefined
+            ? parseInt(state.temp, 10)
+            : null;
         const mode = state?.mode || null;
         const modeText = mode === 'hot' ? '난방' : mode === 'cool' ? '냉방' : '';
         
@@ -302,17 +318,32 @@ function createDeviceCard(deviceId) {
         card.innerHTML = `
             <div class="device-floor-badge">${floor}</div>
             <div class="device-header">
-                <div class="device-id">${deviceId} <span class="device-location-inline">${location}</span></div>
+                <div class="device-id">
+                    <span class="device-location-strong">${location}</span>
+                    <span class="device-id-inline">${deviceId}</span>
+                </div>
                 <div class="device-status">
                     ${isPending ? '<div class="status-indicator pending-indicator"></div>' : `<div class="status-indicator ${!hasIssue ? 'active' : 'inactive'}"></div>`}
                 </div>
             </div>
-            <div class="device-info">
+            <div class="device-info device-info-row">
                 <div class="power-status">
-                    ${isPending ? '<span class="pending-text">진행중...</span>' : `<span class="power-icon ${isOn ? 'on' : 'off'}">${isOn ? '●' : '○'}</span><span>${isOn ? 'ON' : 'OFF'}</span>${isOn && modeText ? `<span class="mode-badge mode-${mode}">${modeText}</span>` : ''}`}
+                    ${isPending
+                        ? '<span class="pending-text">진행중...</span>'
+                        : `<span class="power-icon ${isOn ? 'on' : 'off'}">${isOn ? '●' : '○'}</span><span>${isOn ? 'ON' : 'OFF'}</span>${isOn && modeText ? `<span class="mode-badge mode-${mode}">${modeText}</span>` : ''}`
+                    }
                 </div>
-                <div class="temp-display">${roomTemp}°</div>
-                <div class="temp-label">${isPending ? '명령 전송 중' : '실내온도'}</div>
+                <div class="temp-right">
+                    <span class="temp-line">
+                        <span class="temp-label">설정</span>
+                        <span class="temp-value">${setTemp !== null ? `${setTemp}&deg;` : '--'}</span>
+                    </span>
+                    <span class="temp-line">
+                        <span class="temp-label">현재</span>
+                        <span class="temp-value">${roomTemp !== '--' ? `${roomTemp}&deg;` : '--'}</span>
+                    </span>
+                    ${isPending ? '<span class="temp-suffix">전송중</span>' : ''}
+                </div>
             </div>
         `;
         
@@ -370,8 +401,16 @@ function selectAllDevices() {
     
     // 첫 번째 장치의 상태로 제어 패널 초기화 (상태가 있으면)
     if (selectedDeviceIds.length > 0) {
-        const firstStatus = deviceStatuses[selectedDeviceIds[0]];
-        const state = firstStatus?.state;
+        // 전체선택 시 f3-ac-01을 기준으로 제어 설정 생성 (없으면 첫 번째 선택 장치로 대체)
+        let baseId = 'f3-ac-01';
+        let baseStatus = null;
+        if (selectedDeviceIds.includes(baseId) && deviceStatuses[baseId]) {
+            baseStatus = deviceStatuses[baseId];
+        } else {
+            baseId = selectedDeviceIds[0];
+            baseStatus = deviceStatuses[baseId];
+        }
+        const state = baseStatus?.state;
         
         if (state) {
             currentCommand.power = state.power ? 'on' : 'off';
@@ -395,6 +434,14 @@ function updateControlPanel() {
     
     // 모드
     updateToggleGroup('mode', currentCommand.mode);
+    // 테마 적용 (냉방일 때 시원한 색상)
+    try {
+        if (currentCommand.mode === 'cool') {
+            document.body.classList.add('theme-cool');
+        } else {
+            document.body.classList.remove('theme-cool');
+        }
+    } catch (e) {}
     
     // 온도
     document.getElementById('tempValue').textContent = currentCommand.temp;
@@ -465,6 +512,7 @@ function setupEventListeners() {
     
     // 전체 켜기/끄기 (빠른 제어용 - 제어 패널 열지 않음)
     allOnBtn.addEventListener('click', async () => {
+        setActionButtonsDisabled(true);
         // 온도 정보가 있는 장치를 진행중으로 표시
         const allDeviceIds = DEVICE_GRID_ORDER.flat();
         allDeviceIds.forEach(deviceId => {
@@ -478,19 +526,22 @@ function setupEventListeners() {
         });
         renderDevices();
         
-        const result = await api.allOn();
-        if (result) {
-            // 진행중 상태 해제
-            pendingDevices.clear();
-            await updateStatus();
-        } else {
-            // 실패 시에도 진행중 상태 해제
-            pendingDevices.clear();
-            renderDevices();
+        try {
+            const result = await api.allOn();
+            if (result) {
+                pendingDevices.clear();
+                await updateStatus();
+            } else {
+                pendingDevices.clear();
+                renderDevices();
+            }
+        } finally {
+            setActionButtonsDisabled(false);
         }
     });
     
     allOffBtn.addEventListener('click', async () => {
+        setActionButtonsDisabled(true);
         // 온도 정보가 있는 장치를 진행중으로 표시
         const allDeviceIds = DEVICE_GRID_ORDER.flat();
         allDeviceIds.forEach(deviceId => {
@@ -504,15 +555,17 @@ function setupEventListeners() {
         });
         renderDevices();
         
-        const result = await api.allOff();
-        if (result) {
-            // 진행중 상태 해제
-            pendingDevices.clear();
-            await updateStatus();
-        } else {
-            // 실패 시에도 진행중 상태 해제
-            pendingDevices.clear();
-            renderDevices();
+        try {
+            const result = await api.allOff();
+            if (result) {
+                pendingDevices.clear();
+                await updateStatus();
+            } else {
+                pendingDevices.clear();
+                renderDevices();
+            }
+        } finally {
+            setActionButtonsDisabled(false);
         }
     });
     
@@ -534,6 +587,14 @@ function setupEventListeners() {
                 } else if (label === '운전 모드') {
                     currentCommand.mode = value;
                     saveCommand(currentCommand);
+                    // 모드 변경 즉시 테마 반영
+                    try {
+                        if (currentCommand.mode === 'cool') {
+                            document.body.classList.add('theme-cool');
+                        } else {
+                            document.body.classList.remove('theme-cool');
+                        }
+                    } catch (e) {}
                 } else if (label === '풍향 자동') {
                     currentCommand.swing = value;
                     saveCommand(currentCommand);
@@ -578,6 +639,7 @@ function setupEventListeners() {
         if (selectedDeviceIds.length === 0) {
             return;
         }
+        setActionButtonsDisabled(true);
         
         // 선택된 모든 장치를 진행중으로 표시
         selectedDeviceIds.forEach(deviceId => {
@@ -587,28 +649,51 @@ function setupEventListeners() {
         
         const command = { ...currentCommand };
         
-        // 선택된 모든 장치에 병렬로 명령 전송
-        const promises = selectedDeviceIds.map(async (deviceId) => {
-            try {
-                const result = await api.setDevice(deviceId, command);
-                // 완료되면 진행중 상태 해제
-                pendingDevices.delete(deviceId);
-                renderDevices();
-                return { deviceId, result, success: true };
-            } catch (error) {
-                // 실패해도 진행중 상태 해제
-                pendingDevices.delete(deviceId);
-                renderDevices();
-                return { deviceId, error, success: false };
+        try {
+            if (selectedDeviceIds.length > 1) {
+                // 2개 이상 선택 시 서버 배치 엔드포인트 사용(서버에서 스레드 병렬 처리)
+                await api.setDevicesBatch(selectedDeviceIds, command);
+                pendingDevices.clear();
+            } else {
+                // 단일 선택은 기존 단일 엔드포인트 사용
+                const onlyId = selectedDeviceIds[0];
+                await api.setDevice(onlyId, command);
+                pendingDevices.delete(onlyId);
             }
-        });
-        
-        // 모든 요청이 완료될 때까지 대기
-        await Promise.all(promises);
-        
-        await updateStatus();
+            await updateStatus();
+        } finally {
+            // 실패/성공 모두 버튼 복구 및 렌더링 반영
+            if (selectedDeviceIds.length > 1) {
+                pendingDevices.clear();
+            }
+            renderDevices();
+            setActionButtonsDisabled(false);
+        }
     });
     
+    // 제어 패널 페이저 탭
+    const pager = document.getElementById('controlPager');
+    const tab1 = document.getElementById('pagerTo1');
+    const tab2 = document.getElementById('pagerTo2');
+    function setActiveTab(idx) {
+        if (!tab1 || !tab2) return;
+        tab1.classList.toggle('active', idx === 0);
+        tab2.classList.toggle('active', idx === 1);
+    }
+    function goToPage(idx) {
+        if (!pager) return;
+        const x = idx * pager.clientWidth;
+        pager.scrollTo({ left: x, behavior: 'smooth' });
+        setActiveTab(idx);
+    }
+    if (tab1) tab1.addEventListener('click', () => goToPage(0));
+    if (tab2) tab2.addEventListener('click', () => goToPage(1));
+    if (pager) {
+        pager.addEventListener('scroll', () => {
+            const idx = Math.round(pager.scrollLeft / Math.max(1, pager.clientWidth));
+            setActiveTab(Math.min(1, Math.max(0, idx)));
+        });
+    }
 }
 
 // 자동 새로고침
