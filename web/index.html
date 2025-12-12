@@ -19,6 +19,7 @@
             </div>
             <div class="all-control">
                 <button id="allSelectBtn" class="btn-all btn-select">전체 선택</button>
+                <button id="scheduleBtn" class="btn-all btn-schedule">예약</button>
                 <button id="allOnBtn" class="btn-all btn-on">전체 켜기</button>
                 <button id="allOffBtn" class="btn-all btn-off">전체 끄기</button>
             </div>
@@ -95,6 +96,92 @@
 
             <div class="control-actions">
                 <button id="applyBtn" class="btn-apply">설정 적용</button>
+            </div>
+        </div>
+
+        <!-- 예약 패널 -->
+        <div class="schedule-panel" id="schedulePanel" style="display: none;">
+            <div class="panel-header">
+                <h2>예약 설정</h2>
+                <div class="pager-tabs" id="scheduleTabs">
+                    <button class="pager-tab active" data-idx="0">1</button>
+                    <button class="pager-tab" data-idx="1">2</button>
+                    <button class="pager-tab" data-idx="2">3</button>
+                    <button class="pager-tab" data-idx="3">4</button>
+                    <button class="pager-tab" data-idx="4">5</button>
+                    <button class="pager-tab" data-idx="5">6</button>
+                    <button class="pager-tab" data-idx="6">7</button>
+                </div>
+            </div>
+            <div class="control-section">
+                <div class="control-pager" id="schedulePager">
+                    <!-- 스케줄 페이지들(1~7)이 JS로 렌더링됩니다 -->
+                </div>
+            </div>
+            <div class="control-actions">
+                <button id="backToControlBtn" class="btn-apply">제어로 돌아가기</button>
+            </div>
+        </div>
+
+        <!-- 시간 설정 모달 -->
+        <div class="modal-backdrop" id="timeModalBackdrop" style="display: none;">
+            <div class="modal">
+                <div class="modal-header">
+                    <h3>운전 시각 설정</h3>
+                </div>
+                <div class="modal-body">
+                    <div class="button-group three">
+                        <button class="btn-option" data-type="once">1회</button>
+                        <button class="btn-option active" data-type="daily">매일</button>
+                        <button class="btn-option" data-type="weekly">매주</button>
+                    </div>
+                    <div class="modal-row" id="rowOnce">
+                        <label>날짜</label>
+                        <input type="date" id="dateOnce">
+                    </div>
+                    <div class="modal-row" id="rowWeekly" style="display:none;">
+                        <label>요일</label>
+                        <select id="weekdaySelect">
+                            <option value="0">월요일</option>
+                            <option value="1">화요일</option>
+                            <option value="2">수요일</option>
+                            <option value="3">목요일</option>
+                            <option value="4">금요일</option>
+                            <option value="5">토요일</option>
+                            <option value="6">일요일</option>
+                        </select>
+                    </div>
+                    <div class="time-grid">
+                        <div>
+                            <label>시작</label>
+                            <div class="time-inputs">
+                                <select id="startAmPm">
+                                    <option value="am">오전</option>
+                                    <option value="pm">오후</option>
+                                </select>
+                                <input type="number" id="startHour" min="1" max="12" value="9">
+                                <span>:</span>
+                                <input type="number" id="startMin" min="0" max="59" value="0">
+                            </div>
+                        </div>
+                        <div>
+                            <label>종료</label>
+                            <div class="time-inputs">
+                                <select id="endAmPm">
+                                    <option value="am">오전</option>
+                                    <option value="pm" selected>오후</option>
+                                </select>
+                                <input type="number" id="endHour" min="1" max="12" value="3">
+                                <span>:</span>
+                                <input type="number" id="endMin" min="0" max="59" value="0">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button id="timeCancelBtn" class="btn-outline">취소</button>
+                    <button id="timeSaveBtn" class="btn-apply">완료</button>
+                </div>
             </div>
         </div>
     </div>

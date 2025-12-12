@@ -35,6 +35,8 @@ let deviceStatuses = {};
 let selectedDeviceIds = []; // 여러 장치 선택 가능
 let pendingDevices = new Set(); // 진행중인 장치 목록
 const GLOBAL_ACTION_TIMEOUT_MS = 10000; // 전체 제어/적용 시 최대 대기 시간
+let schedules = []; // 예약 스케줄 목록(7개)
+let scheduleEditingIndex = null; // 시간 모달에서 편집 중인 스케줄 인덱스
 
 // Health 상태 안정화를 위한 히스토리 관리
 const healthHistory = {}; // { deviceId: { recent: [{healthy, timestamp}], stable: true/false, lastChangeTime } }
@@ -78,16 +80,36 @@ let currentCommand = loadSavedCommand();
 // DOM 요소
 const devicesGrid = document.getElementById('devicesGrid');
 const controlPanel = document.getElementById('controlPanel');
+const schedulePanel = document.getElementById('schedulePanel');
 const selectedDeviceText = document.getElementById('selectedDevice');
 const allOnBtn = document.getElementById('allOnBtn');
 const allOffBtn = document.getElementById('allOffBtn');
 const applyBtn = document.getElementById('applyBtn');
+const scheduleBtn = document.getElementById('scheduleBtn');
+const backToControlBtn = document.getElementById('backToControlBtn');
+const schedulePager = document.getElementById('schedulePager');
+const scheduleTabs = document.getElementById('scheduleTabs');
+// 시간 모달
+const timeModalBackdrop = document.getElementById('timeModalBackdrop');
+const timeCancelBtn = document.getElementById('timeCancelBtn');
+const timeSaveBtn = document.getElementById('timeSaveBtn');
+const startAmPm = document.getElementById('startAmPm');
+const startHour = document.getElementById('startHour');
+const startMin = document.getElementById('startMin');
+const endAmPm = document.getElementById('endAmPm');
+const endHour = document.getElementById('endHour');
+const endMin = document.getElementById('endMin');
+const rowOnce = document.getElementById('rowOnce');
+const rowWeekly = document.getElementById('rowWeekly');
+const weekdaySelect = document.getElementById('weekdaySelect');
+const dateOnce = document.getElementById('dateOnce');
 
 function setActionButtonsDisabled(disabled) {
     try {
         if (allOnBtn) allOnBtn.disabled = disabled;
         if (allOffBtn) allOffBtn.disabled = disabled;
         if (applyBtn) applyBtn.disabled = disabled;
+        if (scheduleBtn) scheduleBtn.disabled = disabled;
     } catch (e) {
         console.warn('setActionButtonsDisabled failed:', e);
     }
@@ -294,7 +316,6 @@ function createDeviceCard(deviceId) {
             ? parseInt(state.temp, 10)
             : null;
         const mode = state?.mode || null;
-        const modeText = mode === 'hot' ? '난방' : mode === 'cool' ? '냉방' : '';
         
         const card = document.createElement('div');
         const isSelected = selectedDeviceIds.includes(deviceId);
@@ -330,7 +351,7 @@ function createDeviceCard(deviceId) {
                 <div class="power-status">
                     ${isPending
                         ? '<span class="pending-text">진행중...</span>'
-                        : `<span class="power-icon ${isOn ? 'on' : 'off'}">${isOn ? '●' : '○'}</span><span>${isOn ? 'ON' : 'OFF'}</span>${isOn && modeText ? `<span class="mode-badge mode-${mode}">${modeText}</span>` : ''}`
+                        : `<span class="power-icon ${isOn ? 'on' : 'off'}">${isOn ? '●' : '○'}</span><span>${isOn ? 'ON' : 'OFF'}</span>`
                     }
                 </div>
                 <div class="temp-right">
@@ -509,6 +530,22 @@ function setupEventListeners() {
             selectAllDevices();
         });
     }
+    // 예약 버튼
+    if (scheduleBtn) {
+        scheduleBtn.addEventListener('click', async () => {
+            controlPanel.style.display = 'none';
+            if (schedulePanel) schedulePanel.style.display = 'flex';
+            await loadSchedules();
+            setActiveScheduleTab(0);
+        });
+    }
+    // 제어로 돌아가기
+    if (backToControlBtn) {
+        backToControlBtn.addEventListener('click', () => {
+            if (schedulePanel) schedulePanel.style.display = 'none';
+            controlPanel.style.display = 'flex';
+        });
+    }
     
     // 전체 켜기/끄기 (빠른 제어용 - 제어 패널 열지 않음)
     allOnBtn.addEventListener('click', async () => {
@@ -620,12 +657,14 @@ function setupEventListeners() {
         }
     });
     
-    // 풍량 버튼 (이벤트 위임 사용)
+    // 풍량 버튼 (이벤트 위임 사용) - '풍량' 그룹에 한정
     document.addEventListener('click', function(e) {
         if (e.target.classList.contains('btn-option')) {
             const btn = e.target;
             const group = btn.closest('.button-group');
             if (group) {
+                const labelEl = btn.closest('.control-item')?.querySelector('label');
+                if (!labelEl || labelEl.textContent !== '풍량') return;
                 group.querySelectorAll('.btn-option').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 currentCommand.fan = btn.dataset.value;
@@ -648,6 +687,27 @@ function setupEventListeners() {
         renderDevices();
         
         const command = { ...currentCommand };
+        // 낙관적 UI 업데이트: 선택된 모든 카드 상태를 즉시 반영
+        try {
+            const intendedPower = command.power === 'on';
+            const intendedMode = command.mode === 'hot' ? 'hot' : 'cool';
+            const intendedTemp = command.temp;
+            selectedDeviceIds.forEach(deviceId => {
+                if (!deviceStatuses[deviceId]) {
+                    deviceStatuses[deviceId] = { id: deviceId, health: { ok: true }, state: {} };
+                }
+                const st = deviceStatuses[deviceId];
+                st.state = {
+                    ...(st.state || {}),
+                    power: intendedPower,
+                    mode: intendedMode,
+                    temp: intendedTemp,
+                };
+            });
+            renderDevices();
+        } catch (e) {
+            // 무시: 낙관적 업데이트 실패해도 서버 응답으로 갱신됨
+        }
         
         try {
             if (selectedDeviceIds.length > 1) {
@@ -694,6 +754,65 @@ function setupEventListeners() {
             setActiveTab(Math.min(1, Math.max(0, idx)));
         });
     }
+
+    // 스케줄 탭
+    if (scheduleTabs) {
+        scheduleTabs.addEventListener('click', (e) => {
+            const btn = e.target.closest('.pager-tab');
+            if (!btn) return;
+            const idx = parseInt(btn.dataset.idx, 10) || 0;
+            goToSchedulePage(idx);
+        });
+    }
+
+    // 모달 타입 버튼
+    const typeGroup = document.querySelector('.modal-body .button-group.three');
+    if (typeGroup) {
+        typeGroup.addEventListener('click', (e) => {
+            const btn = e.target.closest('.btn-option');
+            if (!btn) return;
+            typeGroup.querySelectorAll('.btn-option').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const type = btn.dataset.type;
+            if (type === 'once') {
+                rowOnce.style.display = '';
+                rowWeekly.style.display = 'none';
+            } else if (type === 'weekly') {
+                rowOnce.style.display = 'none';
+                rowWeekly.style.display = '';
+            } else {
+                rowOnce.style.display = 'none';
+                rowWeekly.style.display = 'none';
+            }
+        });
+    }
+    // 모달 취소/완료
+    if (timeCancelBtn) {
+        timeCancelBtn.addEventListener('click', () => closeTimeModal());
+    }
+    if (timeSaveBtn) {
+        timeSaveBtn.addEventListener('click', async () => {
+            if (scheduleEditingIndex == null) return;
+            const idx = scheduleEditingIndex;
+            const typeBtn = document.querySelector('.modal-body .button-group.three .btn-option.active');
+            const type = typeBtn ? typeBtn.dataset.type : 'daily';
+            const startTotalMin = ampmToMin(startAmPm.value, startHour.value, startMin.value);
+            const endTotalMin = ampmToMin(endAmPm.value, endHour.value, endMin.value);
+            const payload = {
+                schedule_type: type,
+                start_time_min: startTotalMin,
+                end_time_min: endTotalMin,
+                date: type === 'once' ? (dateOnce.value || null) : null,
+                weekday: type === 'weekly' ? parseInt(weekdaySelect.value, 10) : null,
+            };
+            const updated = await api.updateSchedule(schedules[idx].id, payload);
+            if (updated && updated.id) {
+                schedules[idx] = updated;
+                renderSchedules();
+                closeTimeModal();
+            }
+        });
+    }
 }
 
 // 자동 새로고침
@@ -717,4 +836,224 @@ function startAutoRefresh() {
 
 // 페이지 로드 시 초기화
 document.addEventListener('DOMContentLoaded', init);
+
+// ========================
+// 더블 탭/제스처 확대 방지
+// ========================
+(function preventZoomGestures() {
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function (e) {
+        const now = Date.now();
+        if (now - lastTouchEnd <= 300) {
+            e.preventDefault(); // 더블 탭 확대 방지
+        }
+        lastTouchEnd = now;
+    }, { passive: false });
+    // iOS 제스처 확대 방지
+    window.addEventListener('gesturestart', function (e) {
+        e.preventDefault();
+    }, { passive: false });
+    // 모바일 Safari의 dblclick 확대 방지
+    window.addEventListener('dblclick', function (e) {
+        e.preventDefault();
+    }, { passive: false });
+})();
+
+// ========================
+// 예약 로직 & UI
+// ========================
+async function loadSchedules() {
+    schedules = await api.getSchedules();
+    if (!Array.isArray(schedules)) schedules = [];
+    while (schedules.length < 7) {
+        schedules.push({
+            id: schedules.length + 1,
+            enabled: false,
+            power: 'on',
+            mode: 'cool',
+            temp: 24,
+            schedule_type: 'daily',
+            date: null,
+            weekday: 0,
+            start_time_min: 9 * 60,
+            end_time_min: 15 * 60,
+            summary: '매일 오전 9:00 ~ 오후 3:00',
+        });
+    }
+    renderSchedules();
+}
+
+function minToAmPm(minute) {
+    const h24 = Math.floor(minute / 60) % 24;
+    const m = minute % 60;
+    const ampm = h24 < 12 ? 'am' : 'pm';
+    let h12 = h24 % 12;
+    if (h12 === 0) h12 = 12;
+    return { ampm, h: h12, m };
+}
+function ampmToMin(ampm, h, m) {
+    let hour = parseInt(h || 0, 10);
+    const min = parseInt(m || 0, 10);
+    if (ampm === 'am') {
+        if (hour === 12) hour = 0;
+    } else {
+        if (hour !== 12) hour = (hour % 12) + 12;
+    }
+    const val = hour * 60 + min;
+    return Math.max(0, Math.min(1439, val));
+}
+
+function renderSchedules() {
+    if (!schedulePager) return;
+    schedulePager.innerHTML = '';
+    for (let i = 0; i < 7; i++) {
+        const sch = schedules[i];
+        const page = document.createElement('div');
+        page.className = 'control-page';
+        page.innerHTML = `
+            <div class="schedule-card ${sch.enabled ? '' : 'inactive'}" data-idx="${i}">
+                <div class="control-item">
+                    <label>스케줄 ${sch.id} 활성화</label>
+                    <div class="toggle-group">
+                        <button class="toggle-btn ${sch.enabled ? 'active' : ''}" data-action="enable" data-value="on">ON</button>
+                        <button class="toggle-btn ${!sch.enabled ? 'active' : ''}" data-action="enable" data-value="off">OFF</button>
+                    </div>
+                </div>
+                <div class="control-item">
+                    <label>전원</label>
+                    <div class="toggle-group">
+                        <button class="toggle-btn ${sch.power === 'on' ? 'active' : ''}" data-action="power" data-value="on">켜기</button>
+                        <button class="toggle-btn ${sch.power === 'off' ? 'active' : ''}" data-action="power" data-value="off">끄기</button>
+                    </div>
+                </div>
+                <div class="control-item">
+                    <label>운전 모드</label>
+                    <div class="toggle-group">
+                        <button class="toggle-btn ${sch.mode === 'cool' ? 'active' : ''}" data-action="mode" data-value="cool">냉방</button>
+                        <button class="toggle-btn ${sch.mode === 'hot' ? 'active' : ''}" data-action="mode" data-value="hot">난방</button>
+                    </div>
+                </div>
+                <div class="control-item">
+                    <label>설정 온도</label>
+                    <div class="temp-control">
+                        <button class="btn-temp" data-action="tempDown">−</button>
+                        <span class="temp-display">${sch.temp}</span>
+                        <button class="btn-temp" data-action="tempUp">+</button>
+                        <span style="font-size: 12px; margin-left: 4px;">°C</span>
+                    </div>
+                </div>
+                <div class="control-item">
+                    <label>운전 시각</label>
+                    <div class="schedule-summary">
+                        <span>${sch.summary || ''}</span>
+                        <span class="link" data-action="editTime">변경</span>
+                    </div>
+                </div>
+                <div class="control-actions">
+                    <button class="btn-apply" data-action="save">설정 적용</button>
+                </div>
+            </div>
+        `;
+        schedulePager.appendChild(page);
+    }
+    // 카드 내 이벤트 위임 (한 번만 바인드되도록 먼저 제거 후 바인드)
+    schedulePager.onclick = async (e) => {
+        const card = e.target.closest('.schedule-card');
+        if (!card) return;
+        const idx = parseInt(card.dataset.idx, 10);
+        const sch = schedules[idx];
+        const btn = e.target.closest('button');
+        if (!btn) return;
+        const action = btn.dataset.action;
+        if (!action) return;
+        if (action === 'enable') {
+            const val = btn.dataset.value === 'on';
+            card.querySelectorAll('[data-action="enable"]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            sch.enabled = val;
+            card.classList.toggle('inactive', !val);
+        } else if (action === 'power') {
+            card.querySelectorAll('[data-action="power"]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            sch.power = btn.dataset.value;
+        } else if (action === 'mode') {
+            card.querySelectorAll('[data-action="mode"]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            sch.mode = btn.dataset.value;
+        } else if (action === 'tempDown') {
+            sch.temp = Math.max(16, (sch.temp || 24) - 1);
+            card.querySelector('.temp-display').textContent = sch.temp;
+        } else if (action === 'tempUp') {
+            sch.temp = Math.min(30, (sch.temp || 24) + 1);
+            card.querySelector('.temp-display').textContent = sch.temp;
+        } else if (action === 'editTime') {
+            openTimeModal(idx);
+        } else if (action === 'save') {
+            const payload = {
+                enabled: !!sch.enabled,
+                power: sch.power,
+                mode: sch.mode,
+                temp: sch.temp,
+                schedule_type: sch.schedule_type,
+                date: sch.schedule_type === 'once' ? (sch.date || null) : null,
+                weekday: sch.schedule_type === 'weekly' ? (sch.weekday ?? 0) : null,
+                start_time_min: sch.start_time_min,
+                end_time_min: sch.end_time_min,
+            };
+            const updated = await api.updateSchedule(sch.id, payload);
+            if (updated && updated.id) {
+                schedules[idx] = updated;
+                renderSchedules();
+            }
+        }
+    };
+}
+
+function setActiveScheduleTab(idx) {
+    if (!scheduleTabs) return;
+    scheduleTabs.querySelectorAll('.pager-tab').forEach((b, i) => {
+        b.classList.toggle('active', i === idx);
+    });
+}
+function goToSchedulePage(idx) {
+    if (!schedulePager) return;
+    const x = idx * schedulePager.clientWidth;
+    schedulePager.scrollTo({ left: x, behavior: 'smooth' });
+    setActiveScheduleTab(idx);
+}
+
+function openTimeModal(idx) {
+    scheduleEditingIndex = idx;
+    const sch = schedules[idx];
+    // 타입 버튼
+    const typeGroup = document.querySelector('.modal-body .button-group.three');
+    if (typeGroup) {
+        typeGroup.querySelectorAll('.btn-option').forEach(b => {
+            b.classList.toggle('active', b.dataset.type === sch.schedule_type);
+        });
+    }
+    // 행 표시
+    rowOnce.style.display = sch.schedule_type === 'once' ? '' : 'none';
+    rowWeekly.style.display = sch.schedule_type === 'weekly' ? '' : 'none';
+    // 날짜/요일
+    dateOnce.value = sch.date || '';
+    weekdaySelect.value = String(sch.weekday ?? 0);
+    // 시간 필드
+    const s = minToAmPm(sch.start_time_min);
+    const e = minToAmPm(sch.end_time_min);
+    startAmPm.value = s.ampm;
+    startHour.value = s.h;
+    startMin.value = s.m;
+    endAmPm.value = e.ampm;
+    endHour.value = e.h;
+    endMin.value = e.m;
+    // 표시
+    timeModalBackdrop.style.display = 'flex';
+    // 저장 시 schedules[idx] 갱신은 timeSaveBtn에서 처리
+}
+function closeTimeModal() {
+    timeModalBackdrop.style.display = 'none';
+    // 모달 저장 시점에 schedules를 갱신했고, 여기서는 인덱스 초기화만
+    scheduleEditingIndex = null;
+}
 

@@ -18,6 +18,8 @@ import os
 import subprocess
 import platform
 import shutil
+import sqlite3
+from datetime import datetime, timedelta
 
 try:
     from zeroconf import ServiceInfo, Zeroconf
@@ -116,6 +118,331 @@ class BatchAcCommand(BaseModel):
     device_ids: list[str]
     command: AcCommand
 
+# ========================
+# 예약/스케줄 DB 및 모델
+# ========================
+DB_PATH = os.path.join(os.path.dirname(__file__), "schedules.db")
+
+class ScheduleItem(BaseModel):
+    id: int
+    enabled: bool
+    power: str  # 'on' | 'off'
+    mode: str   # 'cool' | 'hot'
+    temp: int
+    schedule_type: str  # 'once' | 'daily' | 'weekly'
+    date: str | None = None  # YYYY-MM-DD (once)
+    weekday: int | None = None  # 0=월 ... 6=일
+    start_time_min: int  # 0..1439
+    end_time_min: int    # 0..1439
+
+def _db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _create_schema(conn: sqlite3.Connection):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS schedules (
+            id INTEGER PRIMARY KEY,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            power TEXT NOT NULL DEFAULT 'on',
+            mode TEXT NOT NULL DEFAULT 'cool',
+            temp INTEGER NOT NULL DEFAULT 24,
+            schedule_type TEXT NOT NULL DEFAULT 'daily',
+            date TEXT,
+            weekday INTEGER,
+            start_time_min INTEGER NOT NULL DEFAULT 540,
+            end_time_min INTEGER NOT NULL DEFAULT 1020
+        )
+    """)
+    # 1..7 기본 레코드 보장
+    for i in range(1, 8):
+        cur.execute("INSERT OR IGNORE INTO schedules(id) VALUES (?)", (i,))
+    conn.commit()
+
+def _recreate_db_with_backup():
+    try:
+        if os.path.exists(DB_PATH):
+            backup = DB_PATH + f".bak.{int(time.time())}"
+            try:
+                os.replace(DB_PATH, backup)
+                print(f"[ScheduleDB] Corrupt DB backed up to {backup}")
+            except Exception:
+                # 백업 실패 시 삭제 시도
+                try:
+                    os.remove(DB_PATH)
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[ScheduleDB] Backup/remove failed: {e}")
+    # 새로 생성
+    try:
+        conn = _db()
+        try:
+            _create_schema(conn)
+            print("[ScheduleDB] Recreated new schedules.db")
+        finally:
+            conn.close()
+    except Exception as e:
+        print(f"[ScheduleDB] Recreate failed: {e}")
+
+def init_db():
+    """DB 무결성 검사 후, 손상 시 새로 생성하여 서버가 중단되지 않도록."""
+    try:
+        conn = _db()
+        try:
+            # 무결성 검사
+            cur = conn.cursor()
+            cur.execute("PRAGMA integrity_check;")
+            row = cur.fetchone()
+            ok = (row and str(row[0]).lower() == "ok")
+            if not ok:
+                print(f"[ScheduleDB] integrity_check failed: {row[0] if row else 'unknown'}")
+                conn.close()
+                _recreate_db_with_backup()
+                return
+            # 스키마/기본 레코드 보장
+            _create_schema(conn)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except sqlite3.DatabaseError as e:
+        print(f"[ScheduleDB] DatabaseError on open/init: {e}")
+        _recreate_db_with_backup()
+    except Exception as e:
+        print(f"[ScheduleDB] Unexpected error on init: {e}")
+        _recreate_db_with_backup()
+
+def row_to_schedule(row: sqlite3.Row) -> dict:
+    return {
+        "id": row["id"],
+        "enabled": bool(row["enabled"]),
+        "power": row["power"],
+        "mode": row["mode"],
+        "temp": row["temp"],
+        "schedule_type": row["schedule_type"],
+        "date": row["date"],
+        "weekday": row["weekday"],
+        "start_time_min": row["start_time_min"],
+        "end_time_min": row["end_time_min"],
+        "summary": make_schedule_summary(
+            row["schedule_type"], row["date"], row["weekday"], row["start_time_min"], row["end_time_min"]
+        ),
+    }
+
+def make_schedule_summary(schedule_type: str, date: str | None, weekday: int | None, start_min: int, end_min: int) -> str:
+    def format_ampm(m: int) -> str:
+        h = (m // 60) % 24
+        mm = m % 60
+        am = "오전" if h < 12 else "오후"
+        hh12 = h if 1 <= h <= 12 else (12 if h in (0, 12) else h - 12)
+        return f"{am} {hh12}:{mm:02d}"
+    start_s = format_ampm(start_min)
+    end_s = format_ampm(end_min)
+    if schedule_type == "once":
+        day = date or "----/--/--"
+        return f"{day} {start_s} ~ {end_s}"
+    elif schedule_type == "daily":
+        return f"매일 {start_s} ~ {end_s}"
+    elif schedule_type == "weekly":
+        # 0=월 ... 6=일
+        week_names = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+        wname = week_names[weekday] if weekday is not None and 0 <= weekday <= 6 else "요일"
+        return f"매주 {wname} {start_s} ~ {end_s}"
+    return ""
+
+@app.get("/schedules")
+def list_schedules():
+    try:
+        conn = _db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM schedules ORDER BY id")
+            rows = cur.fetchall()
+            return [row_to_schedule(r) for r in rows]
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError as e:
+        print(f"[ScheduleDB] list_schedules error: {e} -> recreating")
+        init_db()
+        try:
+            conn = _db()
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM schedules ORDER BY id")
+                rows = cur.fetchall()
+                return [row_to_schedule(r) for r in rows]
+            finally:
+                conn.close()
+        except Exception:
+            return []
+
+class ScheduleUpdate(BaseModel):
+    enabled: bool | None = None
+    power: str | None = None
+    mode: str | None = None
+    temp: int | None = None
+    schedule_type: str | None = None
+    date: str | None = None
+    weekday: int | None = None
+    start_time_min: int | None = None
+    end_time_min: int | None = None
+
+@app.put("/schedules/{sid}")
+def update_schedule(sid: int, payload: ScheduleUpdate):
+    if sid < 1 or sid > 7:
+        raise HTTPException(status_code=400, detail="sid must be 1..7")
+    # 유효성 간단 체크
+    if payload.power and payload.power not in ("on", "off"):
+        raise HTTPException(status_code=400, detail="invalid power")
+    if payload.mode and payload.mode not in ("cool", "hot"):
+        raise HTTPException(status_code=400, detail="invalid mode")
+    if payload.schedule_type and payload.schedule_type not in ("once", "daily", "weekly"):
+        raise HTTPException(status_code=400, detail="invalid schedule_type")
+    if payload.start_time_min is not None and not (0 <= payload.start_time_min <= 1439):
+        raise HTTPException(status_code=400, detail="invalid start_time_min")
+    if payload.end_time_min is not None and not (0 <= payload.end_time_min <= 1439):
+        raise HTTPException(status_code=400, detail="invalid end_time_min")
+    if payload.weekday is not None and not (0 <= payload.weekday <= 6):
+        raise HTTPException(status_code=400, detail="invalid weekday")
+    def _do_update():
+        conn = _db()
+        try:
+            cur = conn.cursor()
+            cur.execute("INSERT OR IGNORE INTO schedules(id) VALUES (?)", (sid,))
+            fields = []
+            values = []
+            for k, v in payload.dict(exclude_unset=True).items():
+                if k == "enabled":
+                    fields.append("enabled=?")
+                    values.append(1 if v else 0)
+                else:
+                    fields.append(f"{k}=?")
+                    values.append(v)
+            if fields:
+                values.append(sid)
+                cur.execute(f"UPDATE schedules SET {', '.join(fields)} WHERE id=?", values)
+                conn.commit()
+            cur.execute("SELECT * FROM schedules WHERE id=?", (sid,))
+            row = cur.fetchone()
+            return row_to_schedule(row)
+        finally:
+            conn.close()
+    try:
+        return _do_update()
+    except sqlite3.DatabaseError as e:
+        print(f"[ScheduleDB] update_schedule error: {e} -> recreating")
+        init_db()
+        try:
+            return _do_update()
+        except Exception as e2:
+            raise HTTPException(status_code=500, detail=f"DB error after recreate: {e2}")
+
+def get_enabled_schedules() -> list[dict]:
+    try:
+        conn = _db()
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM schedules WHERE enabled=1 ORDER BY id")
+            rows = cur.fetchall()
+            return [row_to_schedule(r) for r in rows]
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError as e:
+        print(f"[ScheduleDB] get_enabled_schedules error: {e} -> recreating")
+        init_db()
+        # 복구 후 빈 목록 반환 (스케줄 없어도 서버는 계속)
+        return []
+
+def minutes_since_midnight(dt: datetime) -> int:
+    return dt.hour * 60 + dt.minute
+
+def _within_5min_window(now_min: int, target_min: int) -> bool:
+    # 순환 1440 고려
+    diff = (now_min - target_min) % 1440
+    return 0 <= diff <= 4
+
+# 최근 전송(분) 기록: {(sid, 'on'|'off'): last_minute}
+schedule_last_sent: dict[tuple[int, str], int] = {}
+
+def _schedule_send_on(power: str, mode: str, temp: int):
+    # all_on은 power를 강제 on으로 설정하므로, power='off' 요청도 허용하기 위해 분기
+    if power == "off":
+        all_off()
+    else:
+        all_on(AcCommand(power="on", mode=mode, temp=temp))
+
+def _schedule_send_off():
+    all_off()
+
+def _schedule_loop():
+    print("[Schedule] Started (every 1 minute)")
+    while True:
+        try:
+            now = datetime.now()
+            now_min = minutes_since_midnight(now)
+            weekday = (now.weekday())  # 월=0 .. 일=6
+            today_str = now.strftime("%Y-%m-%d")
+
+            schedules = get_enabled_schedules()
+            for sch in schedules:
+                sid = sch["id"]
+                st = sch["schedule_type"]
+                s_min = sch["start_time_min"]
+                e_min = sch["end_time_min"]
+                do_on = False
+                do_off = False
+
+                if st == "daily":
+                    if _within_5min_window(now_min, s_min):
+                        do_on = True
+                    if _within_5min_window(now_min, e_min):
+                        do_off = True
+                elif st == "weekly":
+                    if sch["weekday"] is not None and sch["weekday"] == weekday:
+                        if _within_5min_window(now_min, s_min):
+                            do_on = True
+                        if _within_5min_window(now_min, e_min):
+                            do_off = True
+                elif st == "once":
+                    if sch["date"] == today_str:
+                        if _within_5min_window(now_min, s_min):
+                            do_on = True
+                        if _within_5min_window(now_min, e_min):
+                            do_off = True
+
+                # 동일 분 중복 방지
+                if do_on:
+                    key = (sid, "on")
+                    if schedule_last_sent.get(key) != now_min:
+                        print(f"[Schedule] #{sid} ON dispatch (power={sch['power']} mode={sch['mode']} temp={sch['temp']})")
+                        _schedule_send_on(sch["power"], sch["mode"], sch["temp"])
+                        schedule_last_sent[key] = now_min
+
+                if do_off:
+                    key = (sid, "off")
+                    if schedule_last_sent.get(key) != now_min:
+                        print(f"[Schedule] #{sid} OFF dispatch")
+                        _schedule_send_off()
+                        schedule_last_sent[key] = now_min
+                        # 1회 예약은 OFF 실행 후 비활성화
+                        if st == "once":
+                            try:
+                                update_schedule(sid, ScheduleUpdate(enabled=False))
+                                print(f"[Schedule] #{sid} once disabled after OFF")
+                            except Exception as _e:
+                                print(f"[Schedule] #{sid} disable failed: {_e}")
+        except Exception as e:
+            print(f"[Schedule] Error: {e}")
+
+        # 다음 분까지 대기 (초를 0으로 맞추는 간단한 로직)
+        time_to_sleep = 60 - datetime.now().second
+        if time_to_sleep <= 0:
+            time_to_sleep = 60
+        time.sleep(time_to_sleep)
 
 def cleanup_devices():
     now = time.time()
@@ -701,8 +1028,12 @@ if __name__ == "__main__":
         print(f"[HTTP] Server starting on {SERVER_HOST}:{SERVER_PORT}")
         print(f"[HTTP] Web interface: http://localhost:{SERVER_PORT}/")
         print(f"[UDP] Listening on port {UDP_LISTEN_PORT}")
+        # 스케줄 DB 초기화
+        init_db()
         # 시계 동기화 루프 시작
         threading.Thread(target=_time_sync_loop, daemon=True).start()
+        # 예약 스케줄 루프 시작
+        threading.Thread(target=_schedule_loop, daemon=True).start()
         
         # mDNS 서비스 등록
         mdns_success = register_mdns()

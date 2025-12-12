@@ -23,6 +23,34 @@ const api = {
             return [];
         }
     },
+    // 예약 스케줄 전체 조회
+    async getSchedules() {
+        try {
+            const response = await fetchWithTimeout(`${API_BASE_URL}/schedules`);
+            if (!response.ok) throw new Error('Failed to fetch schedules');
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching schedules:', error);
+            return [];
+        }
+    },
+    // 예약 스케줄 업데이트
+    async updateSchedule(scheduleId, payload) {
+        try {
+            const response = await fetchWithTimeout(`${API_BASE_URL}/schedules/${scheduleId}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload || {}),
+            });
+            if (!response.ok) throw new Error('Failed to update schedule');
+            return await response.json();
+        } catch (error) {
+            console.error('Error updating schedule:', error);
+            return { ok: false, error: error.message };
+        }
+    },
 
     // 선택된 여러 장치 제어(서버 배치 엔드포인트)
     async setDevicesBatch(deviceIds, command) {
