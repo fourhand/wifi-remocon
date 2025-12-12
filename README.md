@@ -77,9 +77,144 @@ deactivate
 
 ## API 엔드포인트
 
-- `GET /devices` - 장치 목록 조회
-- `GET /devices/status` - 모든 장치 상태 조회
-- `GET /devices/{device_id}/ac/state` - 특정 장치 상태 조회
-- `POST /devices/{device_id}/ac/set` - 특정 장치 제어
-- `POST /all/on` - 모든 장치 켜기
-- `POST /all/off` - 모든 장치 끄기
+### 공통
+- **Base URL**: `http://localhost:8000`
+- **Content-Type**: `application/json`
+
+### 요청 바디 스키마: AcCommand
+- **power**: `"on"` | `"off"` (예: `"on"`)
+- **mode**: 냉방/난방/제습/송풍/자동 등 장치가 이해하는 문자열 (예: `"cool"`)
+- **temp**: 정수 온도 (예: `24`)
+- **fan**: 풍량 (예: `"low"`, `"mid"`, `"high"`)
+- **swing**: 풍향 (예: `"on"`, `"off"` 등)
+
+필드는 모두 선택이며, 전달된 필드만 장치에 반영됩니다.
+
+---
+
+### GET /devices
+- **설명**: 현재 발견된 장치 목록 조회
+- **응답 예시**
+```json
+[
+  {
+    "id": "ac-01",
+    "ip": "192.168.0.12",
+    "port": 80,
+    "last_seen": 1733980000.123
+  }
+]
+```
+
+### GET /devices/{device_id}/health
+- **설명**: 특정 장치 Health 체크
+- **응답 예시**
+```json
+{
+  "device": "ac-01",
+  "health": { "ok": true, "status_code": 200 }
+}
+```
+
+### GET /devices/{device_id}/ac/state
+- **설명**: 특정 장치의 현재 상태 조회
+- **응답 예시**
+```json
+{
+  "device": "ac-01",
+  "ok": true,
+  "state": {
+    "power": "on",
+    "mode": "cool",
+    "temp": 24,
+    "fan": "mid",
+    "swing": "off"
+  }
+}
+```
+
+### GET /devices/status
+- **설명**: 모든 장치의 상태를 한 번에 조회
+- **응답 예시**
+```json
+[
+  {
+    "id": "ac-01",
+    "ip": "192.168.0.12",
+    "port": 80,
+    "health": { "ok": true, "status_code": 200 },
+    "state": {
+      "power": "on",
+      "mode": "cool",
+      "temp": 24,
+      "fan": "mid",
+      "swing": "off"
+    }
+  }
+]
+```
+
+### POST /devices/{device_id}/ac/set
+- **설명**: 특정 장치 제어
+- **바디**: `AcCommand`
+- **응답 예시**
+```json
+{
+  "device": "ac-01",
+  "ip": "192.168.0.12",
+  "params": { "power": "on", "mode": "cool", "temp": 24 },
+  "result": {
+    "ok": true,
+    "status_code": 200,
+    "attempts": 7,
+    "all_results": [
+      { "ok": true, "status_code": 200, "attempt": 1 }
+      // ... 반복 전송 결과
+    ]
+  }
+}
+```
+
+### POST /all/on
+- **설명**: 모든 장치를 켬. 기본값은 `{"power":"on","mode":"cool","temp":24}` 이며, 바디로 전달한 필드로 덮어쓸 수 있음
+- **바디(선택)**: `AcCommand`
+- **응답**: 각 장치별 결과 맵
+```json
+{
+  "command": { "power": "on", "mode": "cool", "temp": 24 },
+  "results": {
+    "ac-01": { "ok": true, "status_code": 200, "attempts": 7, "all_results": [/*...*/] }
+  }
+}
+```
+
+### POST /all/off
+- **설명**: 모든 장치를 끔
+- **바디**: 없음
+- **응답**: `/all/on`과 동일 형태로 각 장치별 결과 반환
+
+### POST /webhook
+- **설명**: 배포 스크립트(`deploy.sh`) 실행 트리거. 비동기로 실행되며, 서버는 즉시 응답.
+- **응답 예시**
+```json
+{ "ok": true, "message": "Deployment started" }
+```
+
+---
+
+### cURL 예시
+```bash
+# 장치 목록
+curl -s http://localhost:8000/devices
+
+# 특정 장치 상태
+curl -s http://localhost:8000/devices/ac-01/ac/state
+
+# 특정 장치 제어 (켜기)
+curl -s -X POST http://localhost:8000/devices/ac-01/ac/set \
+  -H "Content-Type: application/json" \
+  -d '{"power":"on","mode":"cool","temp":24}'
+
+# 모두 끄기
+curl -s -X POST http://localhost:8000/all/off
+```
