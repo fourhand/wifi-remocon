@@ -826,6 +826,11 @@ body.theme-cool .temp-control {
 .schedule-summary {
     font-size: 12px;
     color: var(--text-secondary);
+    padding: 8px 10px;
+    border: 2px dashed var(--border-color);
+    border-radius: 8px;
+    background: #fffdf9;
+    cursor: pointer;
 }
 .schedule-summary .link {
     color: var(--accent-color);
@@ -837,18 +842,19 @@ body.theme-cool .temp-control {
 .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.4);
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    background: #fffdf9; /* 전체화면 패널 느낌 */
+    display: none; /* 기본 숨김, 필요 시 flex로 변경 */
+    align-items: stretch;
+    justify-content: stretch;
     z-index: 999;
 }
 .modal {
-    width: min(520px, 92vw);
+    width: 100vw;
+    height: 100dvh;
     background: #fffdf9;
-    border: 2px solid var(--border-color);
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -856,22 +862,27 @@ body.theme-cool .temp-control {
 .modal-header {
     padding: 12px;
     border-bottom: 1px solid var(--border-color);
+    padding-top: calc(12px + env(safe-area-inset-top));
 }
 .modal-header h3 {
     margin: 0;
-    font-size: 16px;
+    font-size: 18px;
 }
 .modal-body {
     padding: 12px;
     display: flex;
     flex-direction: column;
     gap: 10px;
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
 }
 .modal-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
     padding: 12px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--border-color);
 }
 .btn-outline {
@@ -897,9 +908,17 @@ body.theme-cool .temp-control {
     font-size: 12px;
     font-weight: 600;
 }
+.modal-row input[type="date"] {
+    flex: 1;
+    padding: 12px;
+    font-size: 18px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    background: white;
+}
 .time-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr; /* 시작 아래 종료를 한 줄씩 */
     gap: 12px;
 }
 .time-inputs {
@@ -907,20 +926,46 @@ body.theme-cool .temp-control {
     align-items: center;
     gap: 6px;
 }
-.time-inputs input[type="number"] {
-    width: 60px;
-    padding: 6px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    background: white;
-}
 .time-inputs select {
-    padding: 6px;
+    padding: 10px;
     border: 1px solid var(--border-color);
     border-radius: 6px;
     background: white;
+    font-size: 18px;
 }
 
+.chip-group {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    padding: 8px 10px;
+    border: 2px solid #d0d0d0;
+    border-radius: 8px;
+    background: #f5f5f5;
+    font-size: 14px;
+    font-weight: 700;
+    color: #666;
+    cursor: pointer;
+    user-select: none;
+}
+
+/* 1회/매일/매주 버튼 크게 */
+.button-group.three .btn-option {
+    font-size: 16px;
+    padding: 10px 12px;
+}
+.chip.active {
+    background: var(--accent-color);
+    border-color: var(--accent-color);
+    color: white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+}
 .button-group.three {
     grid-template-columns: repeat(3, 1fr);
 }

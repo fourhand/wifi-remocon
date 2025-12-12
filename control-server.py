@@ -368,12 +368,9 @@ def _within_5min_window(now_min: int, target_min: int) -> bool:
 # 최근 전송(분) 기록: {(sid, 'on'|'off'): last_minute}
 schedule_last_sent: dict[tuple[int, str], int] = {}
 
-def _schedule_send_on(power: str, mode: str, temp: int):
-    # all_on은 power를 강제 on으로 설정하므로, power='off' 요청도 허용하기 위해 분기
-    if power == "off":
-        all_off()
-    else:
-        all_on(AcCommand(power="on", mode=mode, temp=temp))
+def _schedule_send_on(mode: str, temp: int):
+    # 예약 시작은 항상 ON + (mode,temp)만 전송
+    all_on(AcCommand(power="on", mode=mode, temp=temp))
 
 def _schedule_send_off():
     all_off()
@@ -418,8 +415,8 @@ def _schedule_loop():
                 if do_on:
                     key = (sid, "on")
                     if schedule_last_sent.get(key) != now_min:
-                        print(f"[Schedule] #{sid} ON dispatch (power={sch['power']} mode={sch['mode']} temp={sch['temp']})")
-                        _schedule_send_on(sch["power"], sch["mode"], sch["temp"])
+                        print(f"[Schedule] #{sid} ON dispatch (mode={sch['mode']} temp={sch['temp']})")
+                        _schedule_send_on(sch["mode"], sch["temp"])
                         schedule_last_sent[key] = now_min
 
                 if do_off:
@@ -815,7 +812,49 @@ def all_on(cmd: AcCommand | None = None):
 
 @app.post("/all/off")
 def all_off():
-    return all_on(AcCommand(power="off"))
+    # power=off만 전송하여 각 모듈의 기존 모드/온도 값은 유지
+    params = {"power": "off"}
+    cleanup_devices()
+    with devices_lock:
+        devs = list(devices.values())
+
+    results: Dict[str, Dict[str, Any]] = {}
+    if not devs:
+        return {"command": params, "results": results}
+
+    max_workers = min(16, max(1, len(devs)))
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
+        future_to_id: Dict[concurrent.futures.Future, str] = {}
+        for dev in devs:
+            fut = executor.submit(send_ac_command, dev, params)
+            future_to_id[fut] = dev["id"]
+
+        done, not_done = concurrent.futures.wait(
+            list(future_to_id.keys()),
+            timeout=ALL_CMD_PER_DEVICE_TIMEOUT_SEC,
+            return_when=concurrent.futures.ALL_COMPLETED
+        )
+
+        for fut in list(done):
+            dev_id = future_to_id.get(fut)
+            if dev_id is None:
+                continue
+            try:
+                results[dev_id] = fut.result()
+            except Exception as e:
+                results[dev_id] = {"ok": False, "error": str(e)}
+
+        for fut in list(not_done):
+            dev_id = future_to_id.get(fut)
+            if dev_id is None:
+                continue
+            fut.cancel()
+            results[dev_id] = {"ok": False, "error": "timeout", "timeout_sec": ALL_CMD_PER_DEVICE_TIMEOUT_SEC}
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    return {"command": params, "results": results}
 
 
 # 정적 파일 서빙 (모든 API 엔드포인트 이후에 마운트)

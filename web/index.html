@@ -119,7 +119,13 @@
                 </div>
             </div>
             <div class="control-actions">
-                <button id="backToControlBtn" class="btn-apply">제어로 돌아가기</button>
+                <div class="control-item">
+                    <label>스케줄 활성화</label>
+                    <div class="toggle-group" id="scheduleEnableBottom">
+                        <button class="toggle-btn" id="scheduleEnableOn">ON</button>
+                        <button class="toggle-btn" id="scheduleEnableOff">OFF</button>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -131,12 +137,11 @@
                 </div>
                 <div class="modal-body">
                     <div class="button-group three">
-                        <button class="btn-option" data-type="once">1회</button>
-                        <button class="btn-option active" data-type="daily">매일</button>
+                        <button class="btn-option active" data-type="once">1회</button>
+                        <button class="btn-option" data-type="daily">매일</button>
                         <button class="btn-option" data-type="weekly">매주</button>
                     </div>
                     <div class="modal-row" id="rowOnce">
-                        <label>날짜</label>
                         <input type="date" id="dateOnce">
                     </div>
                     <div class="modal-row" id="rowWeekly" style="display:none;">
@@ -153,27 +158,65 @@
                     </div>
                     <div class="time-grid">
                         <div>
-                            <label>시작</label>
                             <div class="time-inputs">
                                 <select id="startAmPm">
                                     <option value="am">오전</option>
                                     <option value="pm">오후</option>
                                 </select>
-                                <input type="number" id="startHour" min="1" max="12" value="9">
+                                <select id="startHourSelect">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                    <option value="6">6</option>
+                                    <option value="7">7</option>
+                                    <option value="8">8</option>
+                                    <option value="9">9</option>
+                                    <option value="10">10</option>
+                                    <option value="11">11</option>
+                                    <option value="12">12</option>
+                                </select>
                                 <span>:</span>
-                                <input type="number" id="startMin" min="0" max="59" value="0">
+                                <select id="startMinSelect">
+                                    <option value="0">00</option>
+                                    <option value="10">10</option>
+                                    <option value="20">20</option>
+                                    <option value="30">30</option>
+                                    <option value="40">40</option>
+                                    <option value="50">50</option>
+                                </select>
                             </div>
                         </div>
                         <div>
-                            <label>종료</label>
                             <div class="time-inputs">
                                 <select id="endAmPm">
                                     <option value="am">오전</option>
                                     <option value="pm" selected>오후</option>
                                 </select>
-                                <input type="number" id="endHour" min="1" max="12" value="3">
+                                <select id="endHourSelect">
+                                    <option value="1">1</option>
+                                    <option value="2">2</option>
+                                    <option value="3">3</option>
+                                    <option value="4">4</option>
+                                    <option value="5">5</option>
+                                    <option value="6">6</option>
+                                    <option value="7">7</option>
+                                    <option value="8">8</option>
+                                    <option value="9">9</option>
+                                    <option value="10">10</option>
+                                    <option value="11">11</option>
+                                    <option value="12">12</option>
+                                </select>
                                 <span>:</span>
-                                <input type="number" id="endMin" min="0" max="59" value="0">
+                                <select id="endMinSelect">
+                                    <option value="0">00</option>
+                                    <option value="10">10</option>
+                                    <option value="20">20</option>
+                                    <option value="30">30</option>
+                                    <option value="40">40</option>
+                                    <option value="50">50</option>
+                                </select>
                             </div>
                         </div>
                     </div>
