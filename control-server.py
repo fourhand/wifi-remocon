@@ -683,6 +683,7 @@ def get_all_status():
         devs = list(devices.values())
     
     status_list = []
+    now_ts = time.time()
     for dev in devs:
         health = get_device_health(dev)
         state_result = get_device_state(dev)
@@ -691,6 +692,8 @@ def get_all_status():
             "id": dev["id"],
             "ip": dev["ip"],
             "port": dev["port"],
+            "last_seen": dev.get("last_seen"),
+            "last_seen_age_sec": int(max(0, now_ts - float(dev.get("last_seen", 0)))) if dev.get("last_seen") else None,
             "health": health,
             "state": state_result.get("state") if state_result.get("ok") else None,
         }
