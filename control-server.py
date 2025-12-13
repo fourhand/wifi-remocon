@@ -325,7 +325,6 @@ def list_schedules():
 
 class ScheduleUpdate(BaseModel):
     enabled: bool | None = None
-    power: str | None = None
     mode: str | None = None
     temp: int | None = None
     schedule_type: str | None = None
@@ -339,8 +338,6 @@ def update_schedule(sid: int, payload: ScheduleUpdate):
     if sid < 1 or sid > 7:
         raise HTTPException(status_code=400, detail="sid must be 1..7")
     # 유효성 간단 체크
-    if payload.power and payload.power not in ("on", "off"):
-        raise HTTPException(status_code=400, detail="invalid power")
     if payload.mode and payload.mode not in ("cool", "hot"):
         raise HTTPException(status_code=400, detail="invalid mode")
     if payload.schedule_type and payload.schedule_type not in ("once", "daily", "weekly"):
@@ -359,6 +356,9 @@ def update_schedule(sid: int, payload: ScheduleUpdate):
             fields = []
             values = []
             for k, v in payload.model_dump(exclude_unset=True).items():
+                if k == "power":
+                    # power 필드는 스케줄 개념상 사용하지 않음
+                    continue
                 if k == "enabled":
                     fields.append("enabled=?")
                     values.append(1 if v else 0)

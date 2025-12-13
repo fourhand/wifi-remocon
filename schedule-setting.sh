@@ -138,14 +138,8 @@ elif [ "$SCH_TYPE" = "weekly" ]; then
   END_HM="$(trim "$END_HM")"
 fi
 
-# 5) 전원/모드/온도 (선택 입력, 비우면 기존 유지)
+# 5) 모드/온도 (선택 입력, 비우면 기존 유지)
 echo ""
-read -r -p "전원(power) [on/off] (비우면 기존 유지): " POWER_VAL
-POWER_VAL="$(trim "$POWER_VAL")"
-if [ -n "$POWER_VAL" ] && [ "$POWER_VAL" != "on" ] && [ "$POWER_VAL" != "off" ]; then
-  echo " - power 값이 on/off가 아니어서 무시합니다."
-  POWER_VAL=""
-fi
 read -r -p "모드(mode) [cool/hot 등] (비우면 기존 유지): " MODE_VAL
 MODE_VAL="$(trim "$MODE_VAL")"
 read -r -p "온도(temp, 정수) (비우면 기존 유지): " TEMP_VAL
@@ -200,7 +194,6 @@ add_field "date" "$DATE_VAL" 1
 add_field "weekday" "$WEEKDAY_VAL" 0
 add_field "start_time_min" "$START_MIN" 0
 add_field "end_time_min" "$END_MIN" 0
-add_field "power" "$POWER_VAL" 1
 add_field "mode" "$MODE_VAL" 1
 add_field "temp" "$TEMP_VAL" 0
 PAYLOAD="${PAYLOAD}}"
