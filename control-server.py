@@ -292,7 +292,7 @@ def make_schedule_summary(schedule_type: str, date: str | None, weekday: int | N
         return f"매일 {start_s} ~ {end_s}"
     elif schedule_type == "weekly":
         # 0=월 ... 6=일
-        week_names = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "일요일"]
+        week_names = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "주일"]
         wname = week_names[weekday] if weekday is not None and 0 <= weekday <= 6 else "요일"
         return f"매주 {wname} {start_s} ~ {end_s}"
     return ""
