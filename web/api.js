@@ -1,5 +1,26 @@
-// API 기본 URL (현재 호스트 사용)
-const API_BASE_URL = window.location.origin;
+// API 기본 URL (라즈베리파이 백엔드로 분리)
+// 우선순위: URL ?api= → localStorage apiBaseUrl → 기본값(라즈베리파이 IP)
+const API_BASE_URL = (() => {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const fromQuery = params.get('api');
+    const fromStorage = localStorage.getItem('apiBaseUrl');
+    const base = (fromQuery || fromStorage || 'http://192.168.0.5:8000').trim();
+    // 마지막 슬래시 제거
+    return base.replace(/\/+$/, '');
+  } catch (_) {
+    return 'http://192.168.0.5:8000';
+  }
+})();
+
+// 선택적으로 런타임에 API 주소 변경
+window.setApiBaseUrl = function (url) {
+  try {
+    if (!url) return;
+    localStorage.setItem('apiBaseUrl', url);
+    window.location.reload();
+  } catch (_) {}
+};
 const DEFAULT_API_TIMEOUT_MS = 10000;
 
 function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_API_TIMEOUT_MS) {

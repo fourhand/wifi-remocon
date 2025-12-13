@@ -6,6 +6,7 @@ import json
 import time
 from typing import Dict, Any
 import concurrent.futures
+import logging
 
 import requests
 from fastapi import FastAPI, HTTPException
@@ -20,6 +21,7 @@ import platform
 import shutil
 import sqlite3
 from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
 
 try:
     from zeroconf import ServiceInfo, Zeroconf
@@ -356,7 +358,7 @@ def update_schedule(sid: int, payload: ScheduleUpdate):
             cur.execute("INSERT OR IGNORE INTO schedules(id) VALUES (?)", (sid,))
             fields = []
             values = []
-            for k, v in payload.dict(exclude_unset=True).items():
+            for k, v in payload.model_dump(exclude_unset=True).items():
                 if k == "enabled":
                     fields.append("enabled=?")
                     values.append(1 if v else 0)
@@ -710,7 +712,7 @@ def webhook():
     try:
         # 비차단 방식으로 배포 스크립트 실행 (실행 권한 불필요)
         subprocess.Popen(
-            ["/bin/bash", "./deploy.sh"],
+            ["/bin/bash", "./update.sh"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -722,7 +724,7 @@ def webhook():
 @app.post("/devices/{device_id}/ac/set")
 def set_ac(device_id: str, cmd: AcCommand):
     dev = get_device(device_id)
-    params = {k: v for k, v in cmd.dict().items() if v is not None}
+    params = {k: v for k, v in cmd.model_dump(exclude_unset=True).items() if v is not None}
     if not params:
         raise HTTPException(status_code=400, detail="No parameters given")
     write_action_log("user_set_ac", {"device_id": device_id, "params": params})
@@ -744,7 +746,7 @@ def set_ac_batch(payload: BatchAcCommand):
         if i not in seen:
             seen.add(i)
             unique_ids.append(i)
-    params = {k: v for k, v in payload.command.dict().items() if v is not None}
+    params = {k: v for k, v in payload.command.model_dump(exclude_unset=True).items() if v is not None}
     if not unique_ids:
         raise HTTPException(status_code=400, detail="No device_ids given")
     if not params:
@@ -820,7 +822,7 @@ def set_ac_batch(payload: BatchAcCommand):
 def all_on(cmd: AcCommand | None = None):
     base = {"power": "on", "mode": "cool", "temp": 24}
     if cmd:
-        for k, v in cmd.dict().items():
+        for k, v in cmd.model_dump(exclude_unset=True).items():
             if v is not None:
                 base[k] = v
     write_action_log("user_all_on", {"command": base})

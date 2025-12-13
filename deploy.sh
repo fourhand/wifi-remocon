@@ -23,11 +23,33 @@ fi
 
 # 서버 재시작
 echo ""
+# systemd 서비스 우선 재시작 시도 (wifi-remocon.service가 있을 경우)
+if command -v systemctl >/dev/null 2>&1; then
+  if systemctl list-unit-files --type=service | grep -q "^wifi-remocon.service"; then
+    echo "[배포] systemd 서비스 감지: wifi-remocon.service"
+    echo "[배포] systemd로 서비스 재시작 시도..."
+    if systemctl restart wifi-remocon.service >/dev/null 2>&1; then
+      echo "[배포] ✓ systemd 서비스 재시작 성공"
+      echo "[배포] 상태: $(systemctl is-active wifi-remocon.service 2>/dev/null) / 부팅연결: $(systemctl is-enabled wifi-remocon.service 2>/dev/null)"
+      echo "[배포] 최근 로그:"
+      journalctl -u wifi-remocon.service -n 20 --no-pager 2>/dev/null || true
+      echo ""
+      echo "========================================"
+      echo "배포 완료 - systemd 서비스가 재시작되었습니다."
+      echo "========================================"
+      exit 0
+    else
+      echo "[배포] ⚠ systemd 재시작 실패, 스크립트 기반 재시작으로 폴백합니다."
+    fi
+  fi
+fi
+
+# 폴백: 기존 프로세스 종료 후 스크립트로 백그라운드 실행
 echo "[배포] 기존 서버 프로세스 종료 시도..."
 pkill -f "control-server.py" >/dev/null 2>&1 || true
 sleep 1
 
-echo "[배포] 서버 재시작..."
+echo "[배포] 서버 재시작 (nohup)..."
 nohup ./start-server.sh >/tmp/wifi-remocon.log 2>&1 &
 disown
 
