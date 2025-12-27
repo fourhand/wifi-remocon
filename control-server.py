@@ -300,6 +300,8 @@ class ScheduleItem(BaseModel):
     temp: int
     schedule_type: str  # 'once' | 'daily' | 'weekly'
     date: str | None = None  # YYYY-MM-DD (once)
+    start_date: str | None = None  # YYYY-MM-DD
+    end_date: str | None = None    # YYYY-MM-DD
     weekday: int | None = None  # 0=월 ... 6=일
     start_time_min: int  # 0..1439
     end_time_min: int    # 0..1439
@@ -320,6 +322,8 @@ def _create_schema(conn: sqlite3.Connection):
             temp INTEGER NOT NULL DEFAULT 24,
             schedule_type TEXT NOT NULL DEFAULT 'daily',
             date TEXT,
+            start_date TEXT,
+            end_date TEXT,
             weekday INTEGER,
             start_time_min INTEGER NOT NULL DEFAULT 540,
             end_time_min INTEGER NOT NULL DEFAULT 1020
@@ -373,6 +377,25 @@ def init_db():
                 return
             # 스키마/기본 레코드 보장
             _create_schema(conn)
+            # 마이그레이션: start_date / end_date 컬럼 추가(if missing) 및 백필
+            try:
+                cur.execute("PRAGMA table_info(schedules);")
+                cols = [r[1] for r in cur.fetchall()]
+                if "start_date" not in cols:
+                    cur.execute("ALTER TABLE schedules ADD COLUMN start_date TEXT")
+                if "end_date" not in cols:
+                    cur.execute("ALTER TABLE schedules ADD COLUMN end_date TEXT")
+                conn.commit()
+                # once 스케줄의 date를 start/end로 백필(없을 때만)
+                cur.execute("""
+                    UPDATE schedules
+                    SET start_date = COALESCE(start_date, date),
+                        end_date   = COALESCE(end_date, date)
+                    WHERE schedule_type = 'once'
+                """)
+                conn.commit()
+            except Exception as e:
+                print(f"[ScheduleDB] migration start/end date: {e}")
         finally:
             try:
                 conn.close()
@@ -394,15 +417,23 @@ def row_to_schedule(row: sqlite3.Row) -> dict:
         "temp": row["temp"],
         "schedule_type": row["schedule_type"],
         "date": row["date"],
+        "start_date": row["start_date"] if "start_date" in row.keys() else None,
+        "end_date": row["end_date"] if "end_date" in row.keys() else None,
         "weekday": row["weekday"],
         "start_time_min": row["start_time_min"],
         "end_time_min": row["end_time_min"],
         "summary": make_schedule_summary(
-            row["schedule_type"], row["date"], row["weekday"], row["start_time_min"], row["end_time_min"]
+            row["schedule_type"],
+            row["date"],
+            (row["start_date"] if "start_date" in row.keys() else None),
+            (row["end_date"] if "end_date" in row.keys() else None),
+            row["weekday"],
+            row["start_time_min"],
+            row["end_time_min"],
         ),
     }
 
-def make_schedule_summary(schedule_type: str, date: str | None, weekday: int | None, start_min: int, end_min: int) -> str:
+def make_schedule_summary(schedule_type: str, date: str | None, start_date: str | None, end_date: str | None, weekday: int | None, start_min: int, end_min: int) -> str:
     def format_ampm(m: int) -> str:
         h = (m // 60) % 24
         mm = m % 60
@@ -412,14 +443,27 @@ def make_schedule_summary(schedule_type: str, date: str | None, weekday: int | N
     start_s = format_ampm(start_min)
     end_s = format_ampm(end_min)
     if schedule_type == "once":
-        day = date or "----/--/--"
-        return f"{day} {start_s} ~ {end_s}"
+        sd = start_date or date
+        ed = end_date or date
+        sd = sd or "----/--/--"
+        ed = ed or sd
+        if sd == ed:
+            return f"{sd} {start_s} ~ {end_s}"
+        return f"{sd} {start_s} ~ {ed} {end_s}"
     elif schedule_type == "daily":
+        if start_date or end_date:
+            sd = start_date or "시작일 미지정"
+            ed = end_date or "무기한"
+            return f"{sd}~{ed} 매일 {start_s} ~ {end_s}"
         return f"매일 {start_s} ~ {end_s}"
     elif schedule_type == "weekly":
         # 0=월 ... 6=일
         week_names = ["월요일", "화요일", "수요일", "목요일", "금요일", "토요일", "주일"]
         wname = week_names[weekday] if weekday is not None and 0 <= weekday <= 6 else "요일"
+        if start_date or end_date:
+            sd = start_date or "시작일 미지정"
+            ed = end_date or "무기한"
+            return f"{sd}~{ed} 매주 {wname} {start_s} ~ {end_s}"
         return f"매주 {wname} {start_s} ~ {end_s}"
     return ""
 
@@ -455,6 +499,8 @@ class ScheduleUpdate(BaseModel):
     temp: int | None = None
     schedule_type: str | None = None
     date: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
     weekday: int | None = None
     start_time_min: int | None = None
     end_time_min: int | None = None
@@ -474,6 +520,17 @@ def update_schedule(sid: int, payload: ScheduleUpdate):
         raise HTTPException(status_code=400, detail="invalid end_time_min")
     if payload.weekday is not None and not (0 <= payload.weekday <= 6):
         raise HTTPException(status_code=400, detail="invalid weekday")
+    # 날짜 형식 간단 검증 (YYYY-MM-DD)
+    def _valid_date(s: str) -> bool:
+        try:
+            datetime.strptime(s, "%Y-%m-%d")
+            return True
+        except Exception:
+            return False
+    if payload.start_date is not None and payload.start_date != "" and not _valid_date(payload.start_date):
+        raise HTTPException(status_code=400, detail="invalid start_date")
+    if payload.end_date is not None and payload.end_date != "" and not _valid_date(payload.end_date):
+        raise HTTPException(status_code=400, detail="invalid end_date")
     def _do_update():
         conn = _db()
         try:
@@ -491,6 +548,15 @@ def update_schedule(sid: int, payload: ScheduleUpdate):
                 else:
                     fields.append(f"{k}=?")
                     values.append(v)
+            # backward compat: date만 온 경우 start/end에 동기화
+            if "start_date=?" not in fields and "end_date=?" not in fields and "date=?" in fields:
+                idx = fields.index("date=?")
+                dval = values[idx]
+                # start_date와 end_date도 동일 값으로 설정
+                fields.append("start_date=?")
+                values.append(dval)
+                fields.append("end_date=?")
+                values.append(dval)
             if fields:
                 values.append(sid)
                 cur.execute(f"UPDATE schedules SET {', '.join(fields)} WHERE id=?", values)
@@ -561,6 +627,24 @@ def _schedule_loop():
                 e_min = sch["end_time_min"]
                 do_on = False
                 do_off = False
+                # 날짜 범위 제한 (옵션)
+                sd = sch.get("start_date") or sch.get("date")
+                ed = sch.get("end_date") or sch.get("date")
+                def _parse_date(s: str | None):
+                    if not s:
+                        return None
+                    try:
+                        return datetime.strptime(s, "%Y-%m-%d").date()
+                    except Exception:
+                        return None
+                sd_d = _parse_date(sd)
+                ed_d = _parse_date(ed)
+                today_d = now.date()
+                # 유효 기간 이탈 시 스킵
+                if sd_d and today_d < sd_d:
+                    continue
+                if ed_d and today_d > ed_d:
+                    continue
 
                 if st == "daily":
                     if _within_5min_window(now_min, s_min):
@@ -574,9 +658,15 @@ def _schedule_loop():
                         if _within_5min_window(now_min, e_min):
                             do_off = True
                 elif st == "once":
-                    if sch["date"] == today_str:
+                    # 시작일/종료일 각각 별도 날짜 기준
+                    if sd is None and sch["date"]:
+                        sd = sch["date"]
+                    if ed is None and sch["date"]:
+                        ed = sch["date"]
+                    if sd == today_str:
                         if _within_5min_window(now_min, s_min):
                             do_on = True
+                    if ed == today_str:
                         if _within_5min_window(now_min, e_min):
                             do_off = True
 
@@ -840,6 +930,11 @@ def get_all_status():
         }
         status_list.append(status)
     return status_list
+
+# Web 호환용 별칭 (기존 프론트가 /devices/status를 호출)
+@app.get("/devices/status")
+def get_all_status_alias():
+    return get_all_status()
 
 
 @app.post("/time/sync")
