@@ -638,10 +638,8 @@ function setupEventListeners() {
         const allDeviceIds = DEVICE_GRID_ORDER.flat();
         allDeviceIds.forEach(deviceId => {
             const device = devices.find(d => d.id === deviceId);
-            const status = deviceStatuses[deviceId];
-            const state = status?.state || null;
-            const hasTemp = state?.room_temp !== null && state?.room_temp !== undefined;
-            if (device && device.ip && hasTemp) {
+            // 전체 제어 시에는 IP만 있으면 진행중으로 표시(일관된 UX)
+            if (device && device.ip) {
                 pendingDevices.add(deviceId);
             }
         });
@@ -667,10 +665,8 @@ function setupEventListeners() {
         const allDeviceIds = DEVICE_GRID_ORDER.flat();
         allDeviceIds.forEach(deviceId => {
             const device = devices.find(d => d.id === deviceId);
-            const status = deviceStatuses[deviceId];
-            const state = status?.state || null;
-            const hasTemp = state?.room_temp !== null && state?.room_temp !== undefined;
-            if (device && device.ip && hasTemp) {
+            // 전체 제어 시에는 IP만 있으면 진행중으로 표시(일관된 UX)
+            if (device && device.ip) {
                 pendingDevices.add(deviceId);
             }
         });
