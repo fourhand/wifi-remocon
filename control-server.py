@@ -4,6 +4,7 @@ import threading
 import socket
 import json
 import time
+import random
 from typing import Dict, Any
 import concurrent.futures
 import logging
@@ -60,6 +61,9 @@ ALL_CMD_PER_DEVICE_TIMEOUT_SEC = int(os.getenv("ALL_CMD_PER_DEVICE_TIMEOUT_SEC",
 # IR 명령 전송 재시도 설정 (기본 1회 전송)
 AC_SEND_ATTEMPTS = int(os.getenv("AC_SEND_ATTEMPTS", "1"))
 AC_SEND_INTERVAL_SEC = float(os.getenv("AC_SEND_INTERVAL_SEC", "0.5"))
+# 실패 시 재시도 백오프/지터 설정
+AC_RETRY_BACKOFF = float(os.getenv("AC_RETRY_BACKOFF", "2.0"))   # 지수 백오프 배수
+AC_RETRY_JITTER_MS = int(os.getenv("AC_RETRY_JITTER_MS", "200")) # 0~지정ms 랜덤 지터
 
 # ========================
 # 액션 로그 설정 (용량 제한 로테이션)
@@ -721,12 +725,18 @@ def get_device(device_id: str) -> Dict[str, Any]:
 
 
 def send_ac_command(dev: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
-    """GET 요청으로 명령 전달 (기본 1회 전송, 환경변수로 재시도/간격 조절)"""
+    """GET 요청으로 명령 전달
+    - 기본 1회 전송
+    - 실패 시에만 재시도 (AC_SEND_ATTEMPTS로 총 시도 횟수 제어)
+    - 간격은 AC_SEND_INTERVAL_SEC를 기반으로 지수 백오프(AC_RETRY_BACKOFF) + 지터(AC_RETRY_JITTER_MS)
+    """
     try:
         url = f"http://{dev['ip']}:{dev['port']}{HTTP_PATH_SET}"
         results = []
-        attempts = max(1, AC_SEND_ATTEMPTS)
-        interval = max(0.0, AC_SEND_INTERVAL_SEC)
+        attempts = max(1, AC_SEND_ATTEMPTS)  # 총 시도 횟수
+        base_interval = max(0.0, AC_SEND_INTERVAL_SEC)
+        backoff = AC_RETRY_BACKOFF if AC_RETRY_BACKOFF >= 1.0 else 1.0
+        jitter_ms = max(0, AC_RETRY_JITTER_MS)
 
         for i in range(attempts):
             try:
@@ -736,15 +746,23 @@ def send_ac_command(dev: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, An
                     "status_code": resp.status_code,
                     "attempt": i + 1
                 })
+                # 성공하면 즉시 중단 (추가 재시도 없음)
+                if resp.ok and 200 <= resp.status_code < 300:
+                    break
             except Exception as e:
                 results.append({
                     "ok": False,
                     "error": str(e),
                     "attempt": i + 1
                 })
-            # 마지막 시도가 아니면 대기
-            if i < attempts - 1 and interval > 0:
-                time.sleep(interval)
+            # 실패했고, 마지막 시도가 아니면 대기 후 재시도
+            if i < attempts - 1:
+                # 지수 백오프 + 지터
+                delay = base_interval * (backoff ** i)
+                if jitter_ms > 0:
+                    delay += random.uniform(0, jitter_ms / 1000.0)
+                if delay > 0:
+                    time.sleep(delay)
         
         # 마지막 결과 반환
         last_result = results[-1] if results else {"ok": False, "error": "No attempts made"}
