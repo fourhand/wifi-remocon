@@ -142,10 +142,70 @@
                         <button class="btn-option" data-type="weekly">매주</button>
                     </div>
                     <div class="modal-row" id="rowOnce">
-                        <label>시작일</label>
+                        <label>시작일 시각</label>
                         <input type="date" id="startDateInput">
-                        <label>종료일</label>
+                        <div class="time-inputs">
+                            <select id="startAmPm">
+                                <option value="am">오전</option>
+                                <option value="pm">오후</option>
+                            </select>
+                            <select id="startHourSelect">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                            </select>
+                            <span>:</span>
+                            <select id="startMinSelect">
+                                <option value="0">00</option>
+                                <option value="10">10</option>
+                                <option value="20">20</option>
+                                <option value="30">30</option>
+                                <option value="40">40</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-row" id="rowEnd">
+                        <label>종요일 시각</label>
                         <input type="date" id="endDateInput">
+                        <div class="time-inputs">
+                            <select id="endAmPm">
+                                <option value="am">오전</option>
+                                <option value="pm" selected>오후</option>
+                            </select>
+                            <select id="endHourSelect">
+                                <option value="1">1</option>
+                                <option value="2">2</option>
+                                <option value="3">3</option>
+                                <option value="4">4</option>
+                                <option value="5">5</option>
+                                <option value="6">6</option>
+                                <option value="7">7</option>
+                                <option value="8">8</option>
+                                <option value="9">9</option>
+                                <option value="10">10</option>
+                                <option value="11">11</option>
+                                <option value="12">12</option>
+                            </select>
+                            <span>:</span>
+                            <select id="endMinSelect">
+                                <option value="0">00</option>
+                                <option value="10">10</option>
+                                <option value="20">20</option>
+                                <option value="30">30</option>
+                                <option value="40">40</option>
+                                <option value="50">50</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="modal-row" id="rowWeekly" style="display:none;">
                         <label>요일</label>
@@ -158,70 +218,6 @@
                             <option value="5">토요일</option>
                             <option value="6">일요일</option>
                         </select>
-                    </div>
-                    <div class="time-grid">
-                        <div>
-                            <div class="time-inputs">
-                                <select id="startAmPm">
-                                    <option value="am">오전</option>
-                                    <option value="pm">오후</option>
-                                </select>
-                                <select id="startHourSelect">
-                                    <option value="1">1</option>
-                                    <option value="2">2</option>
-                                    <option value="3">3</option>
-                                    <option value="4">4</option>
-                                    <option value="5">5</option>
-                                    <option value="6">6</option>
-                                    <option value="7">7</option>
-                                    <option value="8">8</option>
-                                    <option value="9">9</option>
-                                    <option value="10">10</option>
-                                    <option value="11">11</option>
-                                    <option value="12">12</option>
-                                </select>
-                                <span>:</span>
-                                <select id="startMinSelect">
-                                    <option value="0">00</option>
-                                    <option value="10">10</option>
-                                    <option value="20">20</option>
-                                    <option value="30">30</option>
-                                    <option value="40">40</option>
-                                    <option value="50">50</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div>
-                            <div class="time-inputs">
-                                <select id="endAmPm">
-                                    <option value="am">오전</option>
-                                    <option value="pm" selected>오후</option>
-                                </select>
-                                <select id="endHourSelect">
-                                    <option value="1">1</option>
-                                    <option value="2">2</option>
-                                    <option value="3">3</option>
-                                    <option value="4">4</option>
-                                    <option value="5">5</option>
-                                    <option value="6">6</option>
-                                    <option value="7">7</option>
-                                    <option value="8">8</option>
-                                    <option value="9">9</option>
-                                    <option value="10">10</option>
-                                    <option value="11">11</option>
-                                    <option value="12">12</option>
-                                </select>
-                                <span>:</span>
-                                <select id="endMinSelect">
-                                    <option value="0">00</option>
-                                    <option value="10">10</option>
-                                    <option value="20">20</option>
-                                    <option value="30">30</option>
-                                    <option value="40">40</option>
-                                    <option value="50">50</option>
-                                </select>
-                            </div>
-                        </div>
                     </div>
                 </div>
                 <div class="modal-actions">

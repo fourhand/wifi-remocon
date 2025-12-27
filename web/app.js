@@ -870,14 +870,9 @@ function setupEventListeners() {
             typeGroup.querySelectorAll('.btn-option').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const type = btn.dataset.type;
-            if (type === 'once') {
-                rowOnce.style.display = '';
-                rowWeekly.style.display = 'none';
-            } else if (type === 'weekly') {
-                rowOnce.style.display = 'none';
+            if (type === 'weekly') {
                 rowWeekly.style.display = '';
             } else {
-                rowOnce.style.display = 'none';
                 rowWeekly.style.display = 'none';
             }
         });
@@ -1140,8 +1135,8 @@ function openTimeModal(idx) {
             b.classList.toggle('active', b.dataset.type === sch.schedule_type);
         });
     }
-    // 행 표시
-    rowOnce.style.display = sch.schedule_type === 'once' ? '' : 'none';
+    // 행 표시 (날짜/시각은 항상 표시, 요일은 weekly에서만)
+    rowOnce.style.display = '';
     rowWeekly.style.display = sch.schedule_type === 'weekly' ? '' : 'none';
     // 날짜/요일
     if (startDateInput) startDateInput.value = (sch.start_date || sch.date || '');
