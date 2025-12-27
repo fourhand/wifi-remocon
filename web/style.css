@@ -819,6 +819,14 @@ body.theme-cool .temp-control {
     flex-direction: column;
     gap: 10px;
 }
+.schedule-card.mode-hot {
+    background: linear-gradient(135deg, #fff5f5 0%, #ffecec 100%);
+    border-color: #ff6b6b;
+}
+.schedule-card.mode-cool {
+    background: linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%);
+    border-color: #4dabf7;
+}
 .schedule-card.inactive {
     background: #f7f7f7;
     opacity: 0.9;
@@ -831,6 +839,14 @@ body.theme-cool .temp-control {
     border-radius: 8px;
     background: #fffdf9;
     cursor: pointer;
+}
+.schedule-card.mode-hot .schedule-summary {
+    border-color: #ff6b6b;
+    background: #fff6f6;
+}
+.schedule-card.mode-cool .schedule-summary {
+    border-color: #4dabf7;
+    background: #f3f9ff;
 }
 .schedule-summary .link {
     color: var(--accent-color);

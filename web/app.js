@@ -1010,7 +1010,7 @@ function renderSchedules() {
         const page = document.createElement('div');
         page.className = 'control-page';
         page.innerHTML = `
-            <div class="schedule-card ${sch.enabled ? '' : 'inactive'}" data-idx="${i}">
+            <div class="schedule-card ${sch.enabled ? '' : 'inactive'} ${sch.mode === 'hot' ? 'mode-hot' : 'mode-cool'}" data-idx="${i}">
                 <div class="control-item">
                     <div class="toggle-group">
                         <button class="toggle-btn ${sch.mode === 'cool' ? 'active' : ''}" data-action="mode" data-value="cool">냉방</button>
@@ -1053,6 +1053,9 @@ function renderSchedules() {
             card.querySelectorAll('[data-action="mode"]').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             sch.mode = btn.dataset.value;
+            // 카드 색상 반영
+            card.classList.toggle('mode-hot', sch.mode === 'hot');
+            card.classList.toggle('mode-cool', sch.mode !== 'hot');
             // 즉시 저장
             try {
                 const updated = await api.updateSchedule(sch.id, { mode: sch.mode });
