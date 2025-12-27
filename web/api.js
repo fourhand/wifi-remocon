@@ -1,15 +1,27 @@
-// API 기본 URL (라즈베리파이 백엔드로 분리)
-// 우선순위: URL ?api= → localStorage apiBaseUrl → 기본값(라즈베리파이 IP)
+// API 기본 URL (외부 제어용 백엔드)
+// 우선순위: URL ?api= → localStorage apiBaseUrl → 현재 페이지 origin → 기본값(내부망 고정 IP)
+const DEFAULT_API_BASE_URL = 'http://192.168.0.5:8000';
 const API_BASE_URL = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
     const fromQuery = params.get('api');
     const fromStorage = localStorage.getItem('apiBaseUrl');
-    const base = (fromQuery || fromStorage || 'http://192.168.0.5:8000').trim();
+    const fromSameOrigin = (() => {
+      try {
+        const origin = window.location?.origin ?? '';
+        if (!origin || origin === 'null') return '';
+        // file:// 등의 스킴은 건너뜀
+        if (!/^https?:/i.test(origin)) return '';
+        return origin;
+      } catch {
+        return '';
+      }
+    })();
+    const base = (fromQuery || fromStorage || fromSameOrigin || DEFAULT_API_BASE_URL).trim();
     // 마지막 슬래시 제거
     return base.replace(/\/+$/, '');
   } catch (_) {
-    return 'http://192.168.0.5:8000';
+    return DEFAULT_API_BASE_URL;
   }
 })();
 
@@ -73,25 +85,49 @@ const api = {
         }
     },
 
-    // 선택된 여러 장치 제어(서버 배치 엔드포인트)
+    // 선택된 여러 장치 제어(백엔드 병렬 엔드포인트)
     async setDevicesBatch(deviceIds, command) {
-        try {
-            const response = await fetchWithTimeout(`${API_BASE_URL}/devices/batch/ac/set`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    device_ids: deviceIds,
-                    command: command || {},
-                }),
-            });
-            if (!response.ok) throw new Error('Failed to set devices batch');
-            return await response.json();
-        } catch (error) {
-            console.error('Error setting devices batch:', error);
-            return { ok: false, error: error.message };
+        if (!Array.isArray(deviceIds) || deviceIds.length === 0) {
+            throw new Error('No device ids provided');
         }
+
+        const payload = {
+            device_ids: deviceIds,
+            command: command || {},
+        };
+
+        const endpoints = ['/devices/control', '/devices/batch/ac/set'];
+        let lastError = null;
+
+        for (const path of endpoints) {
+            try {
+                const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                if (response.status === 404 || response.status === 405) {
+                    lastError = new Error(`Endpoint ${path} is not available`);
+                    continue;
+                }
+
+                if (!response.ok) {
+                    const text = await response.text().catch(() => '');
+                    throw new Error(`Batch request failed (${response.status} ${response.statusText}) ${text}`);
+                }
+
+                const data = await response.json();
+                return { ...data, _endpoint: path };
+            } catch (error) {
+                lastError = error;
+                console.warn(`Batch API call failed at ${path}:`, error);
+            }
+        }
+
+        throw lastError || new Error('No batch control endpoint responded');
     },
 
     // 모든 장치 상태 조회

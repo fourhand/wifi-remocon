@@ -738,28 +738,40 @@ def set_ac(device_id: str, cmd: AcCommand):
         pass
     return {"device": dev["id"], "ip": dev["ip"], "params": params, "result": result}
 
-@app.post("/devices/batch/ac/set")
-def set_ac_batch(payload: BatchAcCommand):
-    # 유효성 검사
-    ids = [i for i in (payload.device_ids or []) if i]
-    # 중복 제거(순서 유지)
+def _normalize_device_ids(ids: list[str] | None) -> list[str]:
+    """device_ids 입력을 정제하고 중복을 제거한다."""
+    if not ids:
+        return []
     seen = set()
-    unique_ids: list[str] = []
-    for i in ids:
-        if i not in seen:
-            seen.add(i)
-            unique_ids.append(i)
-    params = {k: v for k, v in payload.command.model_dump(exclude_unset=True).items() if v is not None}
-    if not unique_ids:
-        raise HTTPException(status_code=400, detail="No device_ids given")
-    if not params:
-        raise HTTPException(status_code=400, detail="No parameters given")
+    ordered: list[str] = []
+    for raw in ids:
+        if raw is None:
+            continue
+        dev_id = str(raw).strip()
+        if not dev_id or dev_id in seen:
+            continue
+        seen.add(dev_id)
+        ordered.append(dev_id)
+    return ordered
 
+
+def _extract_command_params(cmd: AcCommand | dict | None) -> dict:
+    """AcCommand에서 실제로 전송할 필드만 추출."""
+    if cmd is None:
+        return {}
+    if isinstance(cmd, dict):
+        items = cmd.items()
+    else:
+        items = cmd.model_dump(exclude_unset=True).items()
+    return {k: v for k, v in items if v is not None}
+
+
+def _execute_batch_command(unique_ids: list[str], params: dict) -> dict:
+    """여러 장치에 병렬로 명령을 전송하고 결과를 요약."""
     cleanup_devices()
     with devices_lock:
         dev_map = dict(devices)
 
-    # 대상 장치 분류
     target_devs: list[Dict[str, Any]] = []
     missing: list[str] = []
     for dev_id in unique_ids:
@@ -770,55 +782,107 @@ def set_ac_batch(payload: BatchAcCommand):
             missing.append(dev_id)
 
     results: Dict[str, Dict[str, Any]] = {}
-    if not target_devs:
-        return {"command": params, "results": results, "missing": missing, "requested_ids": unique_ids}
+    summary = {
+        "requested": len(unique_ids),
+        "missing": len(missing),
+        "attempted": len(target_devs),
+        "succeeded": 0,
+        "failed": 0,
+    }
 
-    write_action_log("user_set_ac_batch", {
+    if target_devs:
+        max_workers = min(16, max(1, len(target_devs)))
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+        try:
+            future_to_id: Dict[concurrent.futures.Future, str] = {}
+            for dev in target_devs:
+                fut = executor.submit(send_ac_command, dev, params)
+                future_to_id[fut] = dev["id"]
+
+            done, not_done = concurrent.futures.wait(
+                list(future_to_id.keys()),
+                timeout=ALL_CMD_PER_DEVICE_TIMEOUT_SEC,
+                return_when=concurrent.futures.ALL_COMPLETED,
+            )
+
+            for fut in list(done):
+                dev_id = future_to_id.get(fut)
+                if dev_id is None:
+                    continue
+                try:
+                    results[dev_id] = fut.result()
+                except Exception as e:
+                    results[dev_id] = {"ok": False, "error": str(e)}
+
+            for fut in list(not_done):
+                dev_id = future_to_id.get(fut)
+                if dev_id is None:
+                    continue
+                fut.cancel()
+                results[dev_id] = {
+                    "ok": False,
+                    "error": "timeout",
+                    "timeout_sec": ALL_CMD_PER_DEVICE_TIMEOUT_SEC,
+                }
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    ok_cnt = sum(1 for v in results.values() if v.get("ok"))
+    summary["succeeded"] = ok_cnt
+    summary["failed"] = max(0, len(results) - ok_cnt)
+
+    return {
+        "command": params,
+        "results": results,
+        "missing": missing,
         "requested_ids": unique_ids,
-        "params": params,
         "target_ids": [d["id"] for d in target_devs],
-        "missing": missing
-    })
+        "summary": summary,
+    }
 
-    max_workers = min(16, max(1, len(target_devs)))
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+
+def _handle_batch_request(payload: BatchAcCommand, log_prefix: str) -> dict:
+    unique_ids = _normalize_device_ids(payload.device_ids)
+    params = _extract_command_params(payload.command)
+    if not unique_ids:
+        raise HTTPException(status_code=400, detail="No device_ids given")
+    if not params:
+        raise HTTPException(status_code=400, detail="No parameters given")
+
     try:
-        future_to_id: Dict[concurrent.futures.Future, str] = {}
-        for dev in target_devs:
-            fut = executor.submit(send_ac_command, dev, params)
-            future_to_id[fut] = dev["id"]
-
-        done, not_done = concurrent.futures.wait(
-            list(future_to_id.keys()),
-            timeout=ALL_CMD_PER_DEVICE_TIMEOUT_SEC,
-            return_when=concurrent.futures.ALL_COMPLETED
+        write_action_log(
+            log_prefix,
+            {"requested_ids": unique_ids, "params": params},
         )
-
-        for fut in list(done):
-            dev_id = future_to_id.get(fut)
-            if dev_id is None:
-                continue
-            try:
-                results[dev_id] = fut.result()
-            except Exception as e:
-                results[dev_id] = {"ok": False, "error": str(e)}
-
-        for fut in list(not_done):
-            dev_id = future_to_id.get(fut)
-            if dev_id is None:
-                continue
-            fut.cancel()
-            results[dev_id] = {"ok": False, "error": "timeout", "timeout_sec": ALL_CMD_PER_DEVICE_TIMEOUT_SEC}
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
-
-    try:
-        ok_cnt = sum(1 for v in results.values() if v.get("ok"))
-        write_action_log("user_set_ac_batch_result", {"ok_count": ok_cnt, "total": len(results)})
     except Exception:
         pass
 
-    return {"command": params, "results": results, "missing": missing, "requested_ids": unique_ids}
+    result = _execute_batch_command(unique_ids, params)
+
+    try:
+        write_action_log(
+            f"{log_prefix}_result",
+            {
+                **result.get("summary", {}),
+                "missing": result.get("missing", []),
+                "target_ids": result.get("target_ids", []),
+            },
+        )
+    except Exception:
+        pass
+
+    return result
+
+
+@app.post("/devices/batch/ac/set")
+def set_ac_batch(payload: BatchAcCommand):
+    return _handle_batch_request(payload, "user_set_ac_batch")
+
+
+@app.post("/devices/control")
+def control_devices(payload: BatchAcCommand):
+    """선택된 장치에 대해 병렬로 명령을 전송하는 통합 엔드포인트."""
+    return _handle_batch_request(payload, "user_control_devices")
 
 
 @app.post("/all/on")

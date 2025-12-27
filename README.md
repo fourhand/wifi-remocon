@@ -175,6 +175,35 @@ deactivate
 }
 ```
 
+### POST /devices/control
+- **설명**: 여러 장치를 한 번에 제어. 서버에서 병렬 처리 후 장치별 결과와 요약을 반환
+- **바디**
+```json
+{
+  "device_ids": ["ac-01", "ac-02"],
+  "command": { "power": "on", "mode": "hot", "temp": 30 }
+}
+```
+- **응답 예시**
+```json
+{
+  "command": { "power": "on", "mode": "hot", "temp": 30 },
+  "requested_ids": ["ac-01", "ac-02"],
+  "target_ids": ["ac-01"],
+  "missing": ["ac-02"],
+  "summary": {
+    "requested": 2,
+    "attempted": 1,
+    "succeeded": 1,
+    "failed": 0,
+    "missing": 1
+  },
+  "results": {
+    "ac-01": { "ok": true, "status_code": 200, "attempts": 7, "all_results": [/* ... */] }
+  }
+}
+```
+
 ### POST /all/on
 - **설명**: 모든 장치를 켬. 기본값은 `{"power":"on","mode":"cool","temp":24}` 이며, 바디로 전달한 필드로 덮어쓸 수 있음
 - **바디(선택)**: `AcCommand`

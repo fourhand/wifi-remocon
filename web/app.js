@@ -117,6 +117,65 @@ function setActionButtonsDisabled(disabled) {
     }
 }
 
+function collectFailedDeviceIds(resultMap) {
+    if (!resultMap) return [];
+    const failed = [];
+    try {
+        Object.entries(resultMap).forEach(([deviceId, value]) => {
+            if (!value) {
+                failed.push(deviceId);
+                return;
+            }
+            if (value.ok === false) {
+                failed.push(deviceId);
+                return;
+            }
+            if (value.result && value.result.ok === false) {
+                failed.push(deviceId);
+            }
+        });
+    } catch (e) {
+        console.warn('collectFailedDeviceIds error:', e);
+    }
+    return failed;
+}
+
+function summarizeBatchResult(batchResult, fallbackRequested = 0) {
+    const summary = batchResult?.summary || {};
+    const results = batchResult?.results || {};
+    const missing = Array.isArray(batchResult?.missing) ? batchResult.missing : [];
+    const failedIds = collectFailedDeviceIds(results);
+    const requested = summary.requested ?? fallbackRequested;
+    const totalRequested = requested || fallbackRequested || 0;
+    const succeeded = summary.succeeded ?? Math.max(0, Object.keys(results).length - failedIds.length);
+    const failed = summary.failed ?? failedIds.length;
+    return {
+        totalRequested,
+        attempted: summary.attempted ?? Math.max(0, totalRequested - missing.length),
+        succeeded,
+        failed,
+        failedIds,
+        missingIds: missing,
+    };
+}
+
+function formatBatchSummaryMessage(info) {
+    if (!info) return '';
+    const parts = [];
+    const total = info.totalRequested || info.attempted || 0;
+    parts.push(`요청 ${total}대 중 ${info.succeeded ?? 0}대 성공`);
+    if (info.failedIds.length) {
+        parts.push(`실패(${info.failedIds.length}): ${info.failedIds.join(', ')}`);
+    }
+    if (info.missingIds.length) {
+        parts.push(`미발견(${info.missingIds.length}): ${info.missingIds.join(', ')}`);
+    }
+    if (!info.failedIds.length && !info.missingIds.length) {
+        parts.push('모든 선택 장치에 명령을 전송했습니다.');
+    }
+    return parts.join('\n');
+}
+
 // 초기화
 async function init() {
     // 저장된 설정으로 제어 패널 초기화
@@ -717,25 +776,44 @@ function setupEventListeners() {
             // 무시: 낙관적 업데이트 실패해도 서버 응답으로 갱신됨
         }
         
+        let summaryMessage = '';
+        let errorMessage = '';
         try {
             if (selectedDeviceIds.length > 1) {
-                // 2개 이상 선택 시 서버 배치 엔드포인트 사용(서버에서 스레드 병렬 처리)
-                await api.setDevicesBatch(selectedDeviceIds, command);
-                pendingDevices.clear();
+                // 2개 이상 선택 시 백엔드 병렬 엔드포인트 사용
+                const batchResult = await api.setDevicesBatch(selectedDeviceIds, command);
+                const info = summarizeBatchResult(batchResult, selectedDeviceIds.length);
+                summaryMessage = formatBatchSummaryMessage(info);
             } else {
                 // 단일 선택은 기존 단일 엔드포인트 사용
                 const onlyId = selectedDeviceIds[0];
-                await api.setDevice(onlyId, command);
-                pendingDevices.delete(onlyId);
+                const singleResult = await api.setDevice(onlyId, command);
+                if (!singleResult || singleResult.ok === false || (singleResult.result && singleResult.result.ok === false)) {
+                    summaryMessage = `장치 ${onlyId} 제어에 실패했습니다.`;
+                } else {
+                    summaryMessage = `장치 ${onlyId} 제어 명령을 전송했습니다.`;
+                }
             }
             await updateStatus();
+        } catch (error) {
+            console.error('Error applying command:', error);
+            summaryMessage = '';
+            errorMessage = error?.message ? `제어 중 오류: ${error.message}` : '제어 중 알 수 없는 오류가 발생했습니다.';
         } finally {
             // 실패/성공 모두 버튼 복구 및 렌더링 반영
-            if (selectedDeviceIds.length > 1) {
-                pendingDevices.clear();
-            }
+            pendingDevices.clear();
             renderDevices();
             setActionButtonsDisabled(false);
+        }
+
+        const notifications = [summaryMessage, errorMessage].filter(Boolean);
+        if (notifications.length > 0) {
+            const message = notifications.join('\n');
+            if (typeof window !== 'undefined' && window.alert) {
+                window.alert(message);
+            } else {
+                console.warn(message);
+            }
         }
     });
     
