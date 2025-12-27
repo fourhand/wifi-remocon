@@ -104,7 +104,8 @@ const endMinSelect = document.getElementById('endMinSelect');
 const rowOnce = document.getElementById('rowOnce');
 const rowWeekly = document.getElementById('rowWeekly');
 const weekdaySelect = document.getElementById('weekdaySelect');
-const dateOnce = document.getElementById('dateOnce');
+const startDateInput = document.getElementById('startDateInput');
+const endDateInput = document.getElementById('endDateInput');
 
 function setActionButtonsDisabled(disabled) {
     try {
@@ -897,11 +898,17 @@ function setupEventListeners() {
             const em = Number(endMinSelect.value || 0);
             const startTotalMin = ampmToMin(startAmPm.value, sh, sm);
             const endTotalMin = ampmToMin(endAmPm.value, eh, em);
+            const sd = startDateInput ? (startDateInput.value || null) : null;
+            const ed = endDateInput ? (endDateInput.value || null) : null;
             const payload = {
                 schedule_type: type,
                 start_time_min: startTotalMin,
                 end_time_min: endTotalMin,
-                date: type === 'once' ? (dateOnce.value || null) : null,
+                // once: start/end 필수(비었으면 null), daily/weekly: 선택적
+                start_date: sd,
+                end_date: ed,
+                // 하위호환용: once인 경우 date도 함께 세팅
+                date: type === 'once' ? (sd || null) : null,
                 weekday: type === 'weekly' ? parseInt(weekdaySelect.value, 10) : null,
             };
             const updated = await api.updateSchedule(schedules[idx].id, payload);
@@ -1137,7 +1144,8 @@ function openTimeModal(idx) {
     rowOnce.style.display = sch.schedule_type === 'once' ? '' : 'none';
     rowWeekly.style.display = sch.schedule_type === 'weekly' ? '' : 'none';
     // 날짜/요일
-    dateOnce.value = sch.date || '';
+    if (startDateInput) startDateInput.value = (sch.start_date || sch.date || '');
+    if (endDateInput) endDateInput.value = (sch.end_date || sch.date || '');
     weekdaySelect.value = String(sch.weekday ?? 0);
     // 시간 필드
     const s = minToAmPm(sch.start_time_min);
