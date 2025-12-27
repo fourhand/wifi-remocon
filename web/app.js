@@ -442,6 +442,14 @@ function createDeviceCard(deviceId) {
 
 // 장치 선택 (단일)
 function selectDevice(deviceId) {
+    // 예약 패널 열려있다면 제어 모드로 전환
+    try {
+        if (schedulePanel && schedulePanel.style.display !== 'none') {
+            schedulePanel.style.display = 'none';
+            if (typeof closeTimeModal === 'function') closeTimeModal();
+            if (controlPanel) controlPanel.style.display = '';
+        }
+    } catch (_) {}
     selectedDeviceIds = [deviceId];
     const status = deviceStatuses[deviceId];
     const state = status?.state;
@@ -461,6 +469,14 @@ function selectDevice(deviceId) {
 
 // 모든 장치 선택
 function selectAllDevices() {
+    // 예약 패널 열려있다면 제어 모드로 전환
+    try {
+        if (schedulePanel && schedulePanel.style.display !== 'none') {
+            schedulePanel.style.display = 'none';
+            if (typeof closeTimeModal === 'function') closeTimeModal();
+            if (controlPanel) controlPanel.style.display = '';
+        }
+    } catch (_) {}
     const allDeviceIds = DEVICE_GRID_ORDER.flat();
     
     // 장치 목록이 비어있으면 로드 먼저 시도
