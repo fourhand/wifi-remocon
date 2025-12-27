@@ -9,7 +9,7 @@ import concurrent.futures
 import logging
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
@@ -43,11 +43,23 @@ SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
 MDNS_HOSTNAME = "aircon-controller"
 MDNS_SERVICE_TYPE = "_http._tcp.local."
+DISCOVERY_INTERVAL_SEC = int(os.getenv("DISCOVERY_INTERVAL_SEC", "30"))  # 서버 주도 discover 주기 (기본 30초)
+# 브로드캐스트 기반 건강 판단: 최근 응답 허용 최대 연령(초)
+# 기본값은 discover 주기의 2배와 120초 중 큰 값
+HEALTH_OK_MAX_AGE_SEC = int(os.getenv("HEALTH_OK_MAX_AGE_SEC", str(max(120, 2 * int(DISCOVERY_INTERVAL_SEC)))))
+# 브로드캐스트 기반 상태 캐시 허용 최대 연령(초)
+# 기본값은 건강 기준과 동일하게 설정
+STATE_OK_MAX_AGE_SEC = int(os.getenv("STATE_OK_MAX_AGE_SEC", str(HEALTH_OK_MAX_AGE_SEC)))
+# 구형 모듈을 위해 상태 캐시가 없거나 오래됐을 때만 HTTP fallback 허용 여부 (기본 비활성)
+STATE_HTTP_FALLBACK = os.getenv("STATE_HTTP_FALLBACK", "0").lower() in ("1", "true", "yes")
 
 HTTP_PATH_SET = "/ac/set"    # ESP8266 코드에 맞춤
 HTTP_TIMEOUT = 2.0
 # 전체 제어 시, 장치별 최대 대기 시간(초) - 초과 시 타임아웃으로 처리
 ALL_CMD_PER_DEVICE_TIMEOUT_SEC = int(os.getenv("ALL_CMD_PER_DEVICE_TIMEOUT_SEC", "10"))
+# IR 명령 전송 재시도 설정 (기본 1회 전송)
+AC_SEND_ATTEMPTS = int(os.getenv("AC_SEND_ATTEMPTS", "1"))
+AC_SEND_INTERVAL_SEC = float(os.getenv("AC_SEND_INTERVAL_SEC", "0.5"))
 
 # ========================
 # 액션 로그 설정 (용량 제한 로테이션)
@@ -110,26 +122,99 @@ devices: Dict[str, Dict[str, Any]] = {}
 # ========================
 def udp_listener():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # 브로드캐스트 활성화 및 타임아웃 설정
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+    except Exception:
+        pass
+    try:
+        sock.settimeout(0.5)
+    except Exception:
+        pass
     sock.bind((UDP_LISTEN_IP, UDP_LISTEN_PORT))
-    print(f"[UDP] Listening on port {UDP_LISTEN_PORT}")
+    print(f"[UDP] Listening on port {UDP_LISTEN_PORT} (broadcast discover every {DISCOVERY_INTERVAL_SEC}s)")
+
+    last_discover = 0.0
 
     while True:
         try:
             data, addr = sock.recvfrom(2048)
-            msg = json.loads(data.decode("utf-8").strip())
-            dev_id = msg.get("id")
-            if not dev_id:
-                continue
-
-            with devices_lock:
-                devices[dev_id] = {
-                    "id": dev_id,
-                    "ip": msg.get("ip", addr[0]),
-                    "port": int(msg.get("port", 80)),
-                    "last_seen": time.time(),
-                }
+            try:
+                msg = json.loads(data.decode("utf-8").strip())
+            except Exception:
+                # JSON이 아니면 무시 (예: 타 시스템 패킷)
+                msg = None
+            if msg:
+                dev_id = msg.get("id")
+                if dev_id:
+                    with devices_lock:
+                        entry = devices.get(dev_id, {}).copy()
+                        entry.update({
+                            "id": dev_id,
+                            "ip": msg.get("ip", addr[0]),
+                            "port": int(msg.get("port", 80)),
+                            "last_seen": time.time(),
+                        })
+                        # 상태 캐시 수신 시 저장
+                        if "state" in msg and isinstance(msg.get("state"), dict):
+                            entry["state"] = msg.get("state")
+                            entry["state_last_seen"] = time.time()
+                        devices[dev_id] = entry
+                        # 응답 로그 출력
+                        try:
+                            st = msg.get("state") if isinstance(msg.get("state"), dict) else None
+                            has_state = "yes" if st else "no"
+                            power = None if not st else ("on" if st.get("power") else "off")
+                            mode = None if not st else st.get("mode")
+                            temp = None if not st else st.get("temp")
+                            extra = ""
+                            if st is not None:
+                                extra = f" power={power} mode={mode} temp={temp}"
+                            print(f"[UDP] resp id={dev_id} from {entry['ip']}:{entry['port']} state={has_state}{extra}")
+                        except Exception:
+                            pass
         except Exception as e:
-            print("[UDP] error:", e)
+            # 타임아웃은 조용히 무시
+            if isinstance(e, socket.timeout):
+                pass
+            else:
+                print("[UDP] error:", e)
+
+        # 주기적으로 discover 브로드캐스트 전송
+        now = time.time()
+        if now - last_discover >= DISCOVERY_INTERVAL_SEC:
+            try:
+                # http_port 힌트를 포함한 JSON 브로드캐스트 (구형 호환을 위해 평문 discover도 허용)
+                msg = json.dumps({"op": "discover", "http_port": SERVER_PORT}).encode("utf-8")
+                sock.sendto(msg, ("255.255.255.255", UDP_LISTEN_PORT))
+                # 구형 호환: 단순 문자열도 함께 송신 (선택)
+                try:
+                    sock.sendto(b"discover", ("255.255.255.255", UDP_LISTEN_PORT))
+                except Exception:
+                    pass
+            except Exception as se:
+                print("[UDP] discover send error:", se)
+            last_discover = now
+
+
+# ========================
+# Broadcast-based health
+# ========================
+def compute_broadcast_health(dev: Dict[str, Any]) -> Dict[str, Any]:
+    """브로드캐스트 응답 시각(last_seen) 기반 건강도 판단"""
+    last_seen = dev.get("last_seen")
+    if not last_seen:
+        return {"ok": False, "error": "no_recent_response", "age_sec": None, "method": "broadcast"}
+    age = int(max(0, time.time() - float(last_seen)))
+    return {
+        "ok": age <= HEALTH_OK_MAX_AGE_SEC,
+        "age_sec": age,
+        "threshold_sec": HEALTH_OK_MAX_AGE_SEC,
+        "method": "broadcast",
+    }
+
+
+ 
 
 listener_thread = threading.Thread(target=udp_listener, daemon=True)
 listener_thread.start()
@@ -149,6 +234,47 @@ app.add_middleware(
 )
 
 # 정적 파일 서빙 (웹 인터페이스) - API 엔드포인트 이후에 마운트
+
+# ========================
+# Unicast state ingest API (from modules)
+# ========================
+@app.post("/devices/put_status")
+async def ingest_status(request: Request):
+    """모듈이 브로드캐스트 수신 후 상태를 유니캐스트(HTTP POST)로 보내는 엔드포인트"""
+    try:
+        payload = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"invalid json: {e}")
+    dev_id = payload.get("id")
+    state = payload.get("state")
+    if not dev_id or not isinstance(state, dict):
+        raise HTTPException(status_code=400, detail="missing id or state")
+
+    client_host = request.client.host if request.client else None
+    now = time.time()
+    ip = payload.get("ip") or client_host
+    port = int(payload.get("port", 80))
+
+    with devices_lock:
+        entry = devices.get(dev_id, {}).copy()
+        entry.update({
+            "id": dev_id,
+            "ip": ip or entry.get("ip"),
+            "port": port,
+            "last_seen": now,              # 헬스 판단 기준
+            "state": state,
+            "state_last_seen": now,        # 상태 캐시 기준
+        })
+        devices[dev_id] = entry
+    try:
+        power = "on" if bool(state.get("power")) else "off"
+        mode = state.get("mode")
+        temp = state.get("temp")
+        method = request.method if hasattr(request, "method") else "HTTP"
+        print(f"[HTTP] {method} state id={dev_id} from {ip}:{port} power={power} mode={mode} temp={temp}")
+    except Exception:
+        pass
+    return {"ok": True}
 
 class AcCommand(BaseModel):
     power: str | None = None
@@ -505,13 +631,14 @@ def get_device(device_id: str) -> Dict[str, Any]:
 
 
 def send_ac_command(dev: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, Any]:
-    """GET 요청으로 명령 전달 (500ms 간격으로 7번 연속 전송)"""
+    """GET 요청으로 명령 전달 (기본 1회 전송, 환경변수로 재시도/간격 조절)"""
     try:
         url = f"http://{dev['ip']}:{dev['port']}{HTTP_PATH_SET}"
         results = []
-        
-        # 500ms 간격으로 7번 연속 전송
-        for i in range(7):
+        attempts = max(1, AC_SEND_ATTEMPTS)
+        interval = max(0.0, AC_SEND_INTERVAL_SEC)
+
+        for i in range(attempts):
             try:
                 resp = requests.get(url, params=params, timeout=HTTP_TIMEOUT)
                 results.append({
@@ -525,10 +652,9 @@ def send_ac_command(dev: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, An
                     "error": str(e),
                     "attempt": i + 1
                 })
-            
-            # 마지막 시도가 아니면 500ms 대기
-            if i < 6:
-                time.sleep(0.5)
+            # 마지막 시도가 아니면 대기
+            if i < attempts - 1 and interval > 0:
+                time.sleep(interval)
         
         # 마지막 결과 반환
         last_result = results[-1] if results else {"ok": False, "error": "No attempts made"}
@@ -664,7 +790,7 @@ def list_devices():
 @app.get("/devices/{device_id}/health")
 def get_health(device_id: str):
     dev = get_device(device_id)
-    result = get_device_health(dev)
+    result = compute_broadcast_health(dev)
     return {"device": dev["id"], "health": result}
 
 
@@ -675,7 +801,7 @@ def get_state(device_id: str):
     return {"device": dev["id"], **result}
 
 
-@app.get("/devices/status")
+@app.get("/devices/get_status")
 def get_all_status():
     """모든 장치의 상태를 한번에 조회"""
     cleanup_devices()
@@ -685,8 +811,21 @@ def get_all_status():
     status_list = []
     now_ts = time.time()
     for dev in devs:
-        health = get_device_health(dev)
-        state_result = get_device_state(dev)
+        # 브로드캐스트 기반 health 계산
+        health = compute_broadcast_health(dev)
+        # 상태 캐시 사용 (브로드캐스트 응답에 포함된 최신 상태)
+        state_obj = None
+        state_age_sec = None
+        if "state" in dev and "state_last_seen" in dev:
+            state_age_sec = int(max(0, now_ts - float(dev.get("state_last_seen", 0))))
+            if state_age_sec <= STATE_OK_MAX_AGE_SEC:
+                state_obj = dev.get("state")
+        # 필요 시에만 HTTP fallback (구형 펌웨어 호환), 기본 비활성
+        if state_obj is None and STATE_HTTP_FALLBACK and health.get("ok"):
+            http_state = get_device_state(dev)
+            if http_state.get("ok"):
+                state_obj = http_state.get("state")
+                state_age_sec = 0
         
         status = {
             "id": dev["id"],
@@ -695,7 +834,9 @@ def get_all_status():
             "last_seen": dev.get("last_seen"),
             "last_seen_age_sec": int(max(0, now_ts - float(dev.get("last_seen", 0)))) if dev.get("last_seen") else None,
             "health": health,
-            "state": state_result.get("state") if state_result.get("ok") else None,
+            "state": state_obj,
+            "state_last_seen": dev.get("state_last_seen"),
+            "state_last_seen_age_sec": state_age_sec,
         }
         status_list.append(status)
     return status_list
@@ -887,12 +1028,17 @@ def control_devices(payload: BatchAcCommand):
 
 @app.post("/all/on")
 def all_on(cmd: AcCommand | None = None):
-    base = {"power": "on", "mode": "cool", "temp": 24}
-    if cmd:
-        for k, v in cmd.model_dump(exclude_unset=True).items():
-            if v is not None:
-                base[k] = v
-    write_action_log("user_all_on", {"command": base})
+    # 기본값: power=on. 추가로 전달된 필드(mode/temp/fan/swing)가 있으면 병합하여 전송
+    base = {"power": "on"}
+    try:
+        extra = {}
+        if cmd is not None:
+            # None이 아닌 값만 추출
+            extra = {k: v for k, v in cmd.model_dump(exclude_unset=True).items() if v is not None}
+        params = {**base, **(extra or {})}
+    except Exception:
+        params = dict(base)
+    write_action_log("user_all_on", {"command": params})
     cleanup_devices()
     with devices_lock:
         devs = list(devices.values())
@@ -900,14 +1046,14 @@ def all_on(cmd: AcCommand | None = None):
     # 장치별 명령을 병렬 전송 (쓰레드) + per-device 타임아웃
     results: Dict[str, Dict[str, Any]] = {}
     if not devs:
-        return {"command": base, "results": results}
+        return {"command": params, "results": results}
 
     max_workers = min(16, max(1, len(devs)))
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     try:
         future_to_id: Dict[concurrent.futures.Future, str] = {}
         for dev in devs:
-            fut = executor.submit(send_ac_command, dev, base)
+            fut = executor.submit(send_ac_command, dev, params)
             future_to_id[fut] = dev["id"]
 
         # 지정된 타임아웃 동안 완료된 작업만 수집
@@ -945,7 +1091,7 @@ def all_on(cmd: AcCommand | None = None):
     except Exception:
         pass
 
-    return {"command": base, "results": results}
+    return {"command": params, "results": results}
 
 
 @app.post("/all/off")
