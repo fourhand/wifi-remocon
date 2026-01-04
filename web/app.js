@@ -63,7 +63,7 @@ function loadSavedCommand() {
         mode: 'cool',
         temp: 24,
         fan: 'auto',
-        swing: 'on',
+        swing: 'off',
     };
 }
 

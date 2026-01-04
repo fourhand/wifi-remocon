@@ -52,6 +52,25 @@ deactivate
 - http://localhost:8000
 - http://aircon-controller.local:8000 (mDNS 사용 시)
 
+### 5. Windows 자동 시작 설정 (선택)
+
+부팅할 때 자동으로 서버를 구동하려면 **관리자 권한** PowerShell(또는 명령 프롬프트)에서 아래 스크립트를 실행하세요.
+
+```powershell
+cd C:\Users\k\Documents\wifi-remocon
+.\register-autostart.bat
+```
+
+- Windows 작업 스케줄러에 `WifiRemoconControlServer` 작업이 생성되며, 부팅 후 30초 뒤 `start-server.bat`을 SYSTEM 권한으로 실행합니다.
+- 자동 시작을 해제하려면:
+
+```powershell
+cd C:\Users\k\Documents\wifi-remocon
+.\unregister-autostart.bat
+```
+
+작업 상태 확인: `schtasks /Query /TN WifiRemoconControlServer`
+
 ## 문제 해결
 
 ### Python을 찾을 수 없는 경우

@@ -29,10 +29,13 @@ static const char* HOST = "f4-ac-01";
 static const uint16_t HTTP_PORT = 80;
 static const uint16_t UDP_PORT  = 4210;
 static const unsigned long MDNS_ANNOUNCE_MS = 120000;
+static const unsigned long WIFI_RETRY_INTERVAL_MS = 5000;    // 재연결 간 최소 대기(5초)
+static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 120000;  // 초기/재연결 대기 한계(120초)
 
 #define ENABLE_HEARTBEAT 0
 
 unsigned long g_lastMdnsAnnounce = 0;
+unsigned long g_lastWifiRetryMs = 0;
 
 // IR / LED 핀
 #define IR_PIN 14  // D5
@@ -348,22 +351,33 @@ void handleNotFound() {
 // ---------------------------
 // WiFi + mDNS
 // ---------------------------
-void connectWiFi() {
+void connectWiFi(bool waitUntilConnected = true) {
   WiFi.mode(WIFI_STA);
   WiFi.persistent(false);
   WiFi.hostname(HOST);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
 
   WiFi.begin(SSID, PASS);
-  Serial.print("Connecting");
+  Serial.print(waitUntilConnected ? "Connecting" : "Reconnecting");
 
-  while (WiFi.status() != WL_CONNECTED) {
+  unsigned long startWait = millis();
+  while (waitUntilConnected && WiFi.status() != WL_CONNECTED) {
     delay(300);
     Serial.print(".");
     // WiFi 스택 유지
     yield();
+    if ((long)(millis() - startWait) >= (long)WIFI_CONNECT_TIMEOUT_MS) {
+      Serial.println("\n[WiFi] 연결 대기 시간 초과. 장치를 재부팅합니다.");
+      delay(500);
+      ESP.restart();
+    }
   }
-  Serial.println("\nConnected: " + WiFi.localIP().toString());
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nConnected: " + WiFi.localIP().toString());
+    g_lastWifiRetryMs = millis();
+  } else {
+    Serial.println("\n[WiFi] 연결 대기 중...");
+  }
 }
 
 void startMDNS() {
@@ -500,6 +514,21 @@ void setup() {
 // Loop
 // ---------------------------
 void loop() {
+  // Wi-Fi 연결 유지
+  if (WiFi.status() != WL_CONNECTED) {
+    unsigned long now = millis();
+    if ((long)(now - g_lastWifiRetryMs) >= (long)WIFI_RETRY_INTERVAL_MS) {
+      Serial.println("[WiFi] Connection lost. Attempting to reconnect...");
+      g_lastWifiRetryMs = now;
+      setLed(false, true);
+      WiFi.disconnect();
+      delay(100);
+      connectWiFi();
+      // 재연결 중에도 다른 작업을 살짝 쉼
+      yield();
+    }
+  }
+
   server.handleClient();
   MDNS.update();
 
