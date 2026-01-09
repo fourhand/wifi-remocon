@@ -31,11 +31,17 @@ static const uint16_t UDP_PORT  = 4210;
 static const unsigned long MDNS_ANNOUNCE_MS = 120000;
 static const unsigned long WIFI_RETRY_INTERVAL_MS = 5000;    // 재연결 간 최소 대기(5초)
 static const unsigned long WIFI_CONNECT_TIMEOUT_MS = 120000;  // 초기/재연결 대기 한계(120초)
+#define MAX_DISCOVER_LEN 256
 
 #define ENABLE_HEARTBEAT 0
 
 unsigned long g_lastMdnsAnnounce = 0;
 unsigned long g_lastWifiRetryMs = 0;
+// WiFi 상태 머신
+enum WifiConnState { WIFI_IDLE = 0, WIFI_CONNECTING = 1, WIFI_WAIT_RETRY = 2 };
+uint8_t g_wifiState = WIFI_IDLE;
+unsigned long g_wifiDeadlineMs = 0;
+unsigned long g_wifiNextRetryMs = 0;
 
 // IR / LED 핀
 #define IR_PIN 14  // D5
@@ -237,32 +243,6 @@ void updateDhtIfNeeded() {
 }
 
 // ---------------------------
-// 서비스 틱(협력형 멀티태스킹)
-// ---------------------------
-inline void serviceTick() {
-  // 네트워킹/웹 요청 처리
-  server.handleClient();
-  MDNS.update();
-  // 주기적 mDNS announce
-  if (millis() - g_lastMdnsAnnounce >= MDNS_ANNOUNCE_MS) {
-    MDNS.announce();
-    g_lastMdnsAnnounce = millis();
-  }
-  // 센서/UDP 처리
-  updateDhtIfNeeded();
-  handleUdpQuery();
-  pushStatusToBackend();
-  // LED 주기 갱신
-  static uint32_t _lastLed = 0;
-  if (millis() - _lastLed > 100) {
-    _lastLed = millis();
-    updateStatusLeds();
-  }
-  // WDT feed 및 WiFi 스택 처리
-  yield();
-}
-
-// ---------------------------
 // JSON 응답
 // ---------------------------
 String stateJson() {
@@ -377,7 +357,7 @@ void handleNotFound() {
 // ---------------------------
 // WiFi + mDNS
 // ---------------------------
-void connectWiFi(bool waitUntilConnected = true) {
+void wifiStartConnect() {
   WiFi.mode(WIFI_STA);
   WiFi.persistent(false);
   WiFi.hostname(HOST);
@@ -385,21 +365,9 @@ void connectWiFi(bool waitUntilConnected = true) {
   WiFi.setAutoReconnect(true);
 
   WiFi.begin(SSID, PASS);
-  Serial.print(waitUntilConnected ? "Connecting" : "Reconnecting");
-
-  unsigned long startWait = millis();
-  while (waitUntilConnected && WiFi.status() != WL_CONNECTED) {
-    Serial.print(".");
-    serviceTick();         // 다른 작업도 계속 돌리기
-    delay(50);
-    if ((long)(millis() - startWait) >= (long)WIFI_CONNECT_TIMEOUT_MS) break;
-  }
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nConnected: " + WiFi.localIP().toString());
-    g_lastWifiRetryMs = millis();
-  } else {
-    Serial.println("\n[WiFi] 연결 대기 중 혹은 비동기 재연결 대기...");
-  }
+  g_wifiState = WIFI_CONNECTING;
+  g_wifiDeadlineMs = millis() + WIFI_CONNECT_TIMEOUT_MS;
+  Serial.print("Connecting");
 }
 
 void startMDNS() {
@@ -450,9 +418,10 @@ void handleUdpQuery() {
   int n = udp.parsePacket();
   if (n <= 0) return;
 
-  char buf[96];
-  if (n > 95) n = 95;
-  int len = udp.read(buf, n);
+  char buf[MAX_DISCOVER_LEN];
+  size_t cap = (n < (int)(sizeof(buf) - 1)) ? n : (sizeof(buf) - 1);
+  int len = udp.read(buf, cap);
+  if (len < 0) return;
   buf[len] = 0;
 
   String q = String(buf);
@@ -460,9 +429,14 @@ void handleUdpQuery() {
   String qLower = q; qLower.toLowerCase();
   String hostLower = String(HOST); hostLower.toLowerCase();
 
-  bool match = (qLower == "discover" ||
-                qLower == "whois *" ||
-                qLower == ("whois " + hostLower));
+  // 느슨한 매칭: JSON/텍스트 discover 모두 트리거로 처리
+  bool match = true;
+  if (!(qLower == "discover" ||
+        qLower == "whois *" ||
+        qLower == ("whois " + hostLower) ||
+        qLower.startsWith("{"))) {
+    match = true;
+  }
 
   if (!match) return;
 
@@ -510,7 +484,7 @@ void setup() {
   dht.begin();
   // 부팅 시 저장된 상태 복원 (없으면 현재 기본값을 초기 저장)
   loadStateFromEeprom();
-  connectWiFi();
+  wifiStartConnect();
   updateStatusLeds();
 
   udp.begin(UDP_PORT);
@@ -536,23 +510,33 @@ void setup() {
 // Loop
 // ---------------------------
 void loop() {
-  // Wi-Fi 연결 유지
-  if (WiFi.status() != WL_CONNECTED) {
-    unsigned long now = millis();
-    if ((long)(now - g_lastWifiRetryMs) >= (long)WIFI_RETRY_INTERVAL_MS) {
-      Serial.println("[WiFi] Connection lost. Attempting to reconnect()...");
-      g_lastWifiRetryMs = now;
-      setLed(false, true);
-      // 1차: 가벼운 재연결
-      WiFi.reconnect();
-      serviceTick();
-      delay(50);
-      // 여전히 미연결이면 begin()으로 재시도(논블로킹)
-      if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[WiFi] reconnect() not immediate. Begin async connect.");
+  // Wi-Fi 상태 머신 (비블로킹)
+  unsigned long _now = millis();
+  if (WiFi.status() == WL_CONNECTED) {
+    if (g_wifiState != WIFI_IDLE) {
+      Serial.println("\nConnected: " + WiFi.localIP().toString());
+      g_wifiState = WIFI_IDLE;
+      g_lastWifiRetryMs = _now;
+    }
+  } else {
+    if (g_wifiState == WIFI_IDLE) {
+      if ((long)(_now - g_lastWifiRetryMs) >= (long)WIFI_RETRY_INTERVAL_MS) {
+        Serial.println("[WiFi] Disconnected. Start connect.");
+        wifiStartConnect();
+      }
+    } else if (g_wifiState == WIFI_CONNECTING) {
+      if ((_now & 0x3FF) < 60) Serial.print(".");
+      if ((long)(_now - g_wifiDeadlineMs) >= 0) {
+        Serial.println("\n[WiFi] Connect timeout. Will retry...");
+        g_wifiState = WIFI_WAIT_RETRY;
+        g_wifiNextRetryMs = _now + WIFI_RETRY_INTERVAL_MS;
+      }
+    } else if (g_wifiState == WIFI_WAIT_RETRY) {
+      if ((long)(_now - g_wifiNextRetryMs) >= 0) {
+        Serial.println("[WiFi] Retrying connect...");
         WiFi.disconnect();
         delay(100);
-        connectWiFi(false); // 비동기 시작
+        wifiStartConnect();
       }
     }
   }
