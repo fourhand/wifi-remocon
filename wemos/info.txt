@@ -1,0 +1,39 @@
+https://www.tindie.com/products/mostlyrobots/wemos-d1-mini-pro-16mb-with-external-antenna/
+
+
+This Wemos D1 Mini Pro ESP8266 Internet of Things Development Board has the same footprint and size as a standard Wemos D1 Mini, but it has both a built-in ceramic antenna or an external antenna (needs soldering skills). This gives it better WiFi range than a normal PCB antenna. Good for projects in the garden or far from an access point.
+
+Specifications:
+
+Dimensions: 1" x 1.3" x 0.063" (25.4mm x 33.0 x 1.6mm)
+11 digital IO, interrupt/PWM/I2C/one-wire supported on 0.1" headers
+1 analog input (3.2V max)
+Micro USB connection with onboard CH340 serial IO chip
+Compatible with MicroPython, Arduino, nodemcu
+3.3v device, can be powered by USB 5v
+16M bytes Flash
+Clock Speed : 80/160MHz
+Onboard chip antenna
+Selectable uFL connector for external antenna (requires soldering)
+More details here: https://docs.wemos.cc/en/latest/d1/d1_mini.html
+
+These tiny IoT development boards are perfect for home automations projects. They can be flashed with the open source Tasmota firmware to use Home Automation applications of MQTT messages to control devices and read sensors.
+
+The board comes with:
+
+Two 8 way pin headers
+Two 8 way sockets
+Two 8 way extension sockets
+uFL to SMA pig tail
+SMA antenna
+** PLEASE NOTE: By default, the on-board ceramic chip antenna is used by the ESP8266. The uFL connector can be used instead by moving an 0603 surface mount zero ohm resistor. If you do not have a capability to do this, I can move it for you before I send it to you. Select the option in the side bar when ordering.
+
+This board is compatible with my 4 Channel MOSFET Shield for Wemos D1 Mini ESP8266 and I use it in my home automation projects.
+
+To read more about the projects I use these boards for read my blog : https://blog.mostlyrobots.net/
+
+Automatic Garden Watering to control four water solenoids connected to garden hoses.
+Immersion Heater Controller to control 2 high current relays to switch two 3kW hot water immersion heaters.
+Automatic plant Pot Watering to control a small peristaltic pump to water pot plants based on moisture reading from a capacitive moisture sensor.
+
+

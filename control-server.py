@@ -59,8 +59,8 @@ HTTP_TIMEOUT = 2.0
 # 전체 제어 시, 장치별 최대 대기 시간(초) - 초과 시 타임아웃으로 처리
 ALL_CMD_PER_DEVICE_TIMEOUT_SEC = int(os.getenv("ALL_CMD_PER_DEVICE_TIMEOUT_SEC", "10"))
 # IR 명령 전송 재시도 설정 (기본 1회 전송)
-AC_SEND_ATTEMPTS = int(os.getenv("AC_SEND_ATTEMPTS", "1"))
-AC_SEND_INTERVAL_SEC = float(os.getenv("AC_SEND_INTERVAL_SEC", "0.5"))
+AC_SEND_ATTEMPTS = int(os.getenv("AC_SEND_ATTEMPTS", "6"))
+AC_SEND_INTERVAL_SEC = float(os.getenv("AC_SEND_INTERVAL_SEC", "2"))
 # 실패 시 재시도 백오프/지터 설정
 AC_RETRY_BACKOFF = float(os.getenv("AC_RETRY_BACKOFF", "2.0"))   # 지수 백오프 배수
 AC_RETRY_JITTER_MS = int(os.getenv("AC_RETRY_JITTER_MS", "200")) # 0~지정ms 랜덤 지터

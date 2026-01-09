@@ -237,6 +237,32 @@ void updateDhtIfNeeded() {
 }
 
 // ---------------------------
+// 서비스 틱(협력형 멀티태스킹)
+// ---------------------------
+inline void serviceTick() {
+  // 네트워킹/웹 요청 처리
+  server.handleClient();
+  MDNS.update();
+  // 주기적 mDNS announce
+  if (millis() - g_lastMdnsAnnounce >= MDNS_ANNOUNCE_MS) {
+    MDNS.announce();
+    g_lastMdnsAnnounce = millis();
+  }
+  // 센서/UDP 처리
+  updateDhtIfNeeded();
+  handleUdpQuery();
+  pushStatusToBackend();
+  // LED 주기 갱신
+  static uint32_t _lastLed = 0;
+  if (millis() - _lastLed > 100) {
+    _lastLed = millis();
+    updateStatusLeds();
+  }
+  // WDT feed 및 WiFi 스택 처리
+  yield();
+}
+
+// ---------------------------
 // JSON 응답
 // ---------------------------
 String stateJson() {
@@ -356,27 +382,23 @@ void connectWiFi(bool waitUntilConnected = true) {
   WiFi.persistent(false);
   WiFi.hostname(HOST);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
+  WiFi.setAutoReconnect(true);
 
   WiFi.begin(SSID, PASS);
   Serial.print(waitUntilConnected ? "Connecting" : "Reconnecting");
 
   unsigned long startWait = millis();
   while (waitUntilConnected && WiFi.status() != WL_CONNECTED) {
-    delay(300);
     Serial.print(".");
-    // WiFi 스택 유지
-    yield();
-    if ((long)(millis() - startWait) >= (long)WIFI_CONNECT_TIMEOUT_MS) {
-      Serial.println("\n[WiFi] 연결 대기 시간 초과. 장치를 재부팅합니다.");
-      delay(500);
-      ESP.restart();
-    }
+    serviceTick();         // 다른 작업도 계속 돌리기
+    delay(50);
+    if ((long)(millis() - startWait) >= (long)WIFI_CONNECT_TIMEOUT_MS) break;
   }
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println("\nConnected: " + WiFi.localIP().toString());
     g_lastWifiRetryMs = millis();
   } else {
-    Serial.println("\n[WiFi] 연결 대기 중...");
+    Serial.println("\n[WiFi] 연결 대기 중 혹은 비동기 재연결 대기...");
   }
 }
 
@@ -518,14 +540,20 @@ void loop() {
   if (WiFi.status() != WL_CONNECTED) {
     unsigned long now = millis();
     if ((long)(now - g_lastWifiRetryMs) >= (long)WIFI_RETRY_INTERVAL_MS) {
-      Serial.println("[WiFi] Connection lost. Attempting to reconnect...");
+      Serial.println("[WiFi] Connection lost. Attempting to reconnect()...");
       g_lastWifiRetryMs = now;
       setLed(false, true);
-      WiFi.disconnect();
-      delay(100);
-      connectWiFi();
-      // 재연결 중에도 다른 작업을 살짝 쉼
-      yield();
+      // 1차: 가벼운 재연결
+      WiFi.reconnect();
+      serviceTick();
+      delay(50);
+      // 여전히 미연결이면 begin()으로 재시도(논블로킹)
+      if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[WiFi] reconnect() not immediate. Begin async connect.");
+        WiFi.disconnect();
+        delay(100);
+        connectWiFi(false); // 비동기 시작
+      }
     }
   }
 

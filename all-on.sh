@@ -42,7 +42,24 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# temp 유효성(선택)
+# 모드/온도 입력이 없을 경우 인터랙티브로 입력 받기
+if [[ -z "$MODE" ]]; then
+  read -r -p "운전 모드 선택 [cool/hot] (기본: cool): " MODE
+  MODE="${MODE:-cool}"
+fi
+LOWER_MODE="$(echo "$MODE" | tr '[:upper:]' '[:lower:]')"
+if [[ "$LOWER_MODE" != "cool" && "$LOWER_MODE" != "hot" ]]; then
+  echo "[오류] 모드는 'cool' 또는 'hot' 중 하나여야 합니다."
+  exit 1
+fi
+MODE="$LOWER_MODE"
+
+if [[ -z "$TEMP" ]]; then
+  read -r -p "설정 온도 입력 (16~30, 기본: 24): " TEMP
+  TEMP="${TEMP:-24}"
+fi
+
+# temp 유효성
 if [[ -n "$TEMP" ]]; then
   if ! echo "$TEMP" | grep -Eq '^-?[0-9]+$'; then
     echo "[오류] --temp 는 정수여야 합니다."
