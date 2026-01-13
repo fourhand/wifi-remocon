@@ -573,9 +573,33 @@
 			(embedded_fonts no)
 		)
 	)
+	(junction
+		(at 140.97 101.6)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "0bd350dd-d61e-4d82-8c0c-9242384d97d6")
+	)
+	(junction
+		(at 156.21 101.6)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "129059a6-a5c2-4632-8eeb-2b7f71e5dd34")
+	)
+	(junction
+		(at 140.97 93.98)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "1de2d599-d469-4de2-9e26-e26b2331b7f4")
+	)
+	(junction
+		(at 156.21 93.98)
+		(diameter 0)
+		(color 0 0 0 0)
+		(uuid "ebf907f0-0a4a-4a66-bbe0-5ea56a769b72")
+	)
 	(wire
 		(pts
-			(xy 121.92 93.98) (xy 168.91 93.98)
+			(xy 121.92 93.98) (xy 140.97 93.98)
 		)
 		(stroke
 			(width 0)
@@ -585,7 +609,7 @@
 	)
 	(wire
 		(pts
-			(xy 176.53 93.98) (xy 176.53 107.95)
+			(xy 176.53 93.98) (xy 176.53 101.6)
 		)
 		(stroke
 			(width 0)
@@ -595,7 +619,7 @@
 	)
 	(wire
 		(pts
-			(xy 128.27 107.95) (xy 128.27 96.52)
+			(xy 133.35 101.6) (xy 133.35 96.52)
 		)
 		(stroke
 			(width 0)
@@ -605,27 +629,37 @@
 	)
 	(wire
 		(pts
-			(xy 143.51 107.95) (xy 151.13 107.95)
+			(xy 140.97 101.6) (xy 156.21 101.6)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "81346b26-c94f-40c1-8305-510fe1e06528")
+		(uuid "7b22dd3a-00b5-4b3c-be64-4fdd0a535894")
 	)
 	(wire
 		(pts
-			(xy 158.75 107.95) (xy 168.91 107.95)
+			(xy 156.21 101.6) (xy 168.91 101.6)
 		)
 		(stroke
 			(width 0)
 			(type default)
 		)
-		(uuid "a110b32b-b407-43ed-be8d-c0a000b69466")
+		(uuid "9d986b29-fe41-4364-a128-0f476063f285")
 	)
 	(wire
 		(pts
-			(xy 135.89 107.95) (xy 128.27 107.95)
+			(xy 156.21 93.98) (xy 168.91 93.98)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "a2225e2e-e0c9-4a76-b1fb-fb3bc293f3cc")
+	)
+	(wire
+		(pts
+			(xy 140.97 101.6) (xy 133.35 101.6)
 		)
 		(stroke
 			(width 0)
@@ -635,7 +669,17 @@
 	)
 	(wire
 		(pts
-			(xy 128.27 96.52) (xy 121.92 96.52)
+			(xy 140.97 93.98) (xy 156.21 93.98)
+		)
+		(stroke
+			(width 0)
+			(type default)
+		)
+		(uuid "ca8e96e3-83af-483f-a0f7-a0d17b93220a")
+	)
+	(wire
+		(pts
+			(xy 133.35 96.52) (xy 121.92 96.52)
 		)
 		(stroke
 			(width 0)
@@ -669,7 +713,7 @@
 				)
 			)
 		)
-		(property "Footprint" "Connector_JST:JST_PH_B2B-PH-K_1x02_P2.00mm_Vertical"
+		(property "Footprint" "Connector_Coaxial:U.FL_Hirose_U.FL-R-SMT-1_Vertical"
 			(at 116.84 93.98 0)
 			(effects
 				(font
@@ -719,7 +763,7 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 139.7 107.95 90)
+		(at 140.97 97.79 0)
 		(mirror x)
 		(unit 1)
 		(exclude_from_sim no)
@@ -728,7 +772,7 @@
 		(dnp no)
 		(uuid "1d823574-f3c7-43c2-a7ab-e4b18da96fc6")
 		(property "Reference" "C1"
-			(at 138.4299 111.76 0)
+			(at 144.78 99.0601 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -737,7 +781,7 @@
 			)
 		)
 		(property "Value" "0.01uF"
-			(at 140.9699 111.76 0)
+			(at 144.78 96.5201 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -746,7 +790,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
-			(at 143.51 108.9152 0)
+			(at 141.9352 93.98 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -755,7 +799,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 139.7 107.95 0)
+			(at 140.97 97.79 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -764,7 +808,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 139.7 107.95 0)
+			(at 140.97 97.79 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -869,16 +913,15 @@
 	)
 	(symbol
 		(lib_id "Device:R")
-		(at 172.72 107.95 90)
+		(at 172.72 101.6 90)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
 		(on_board yes)
 		(dnp no)
-		(fields_autoplaced yes)
 		(uuid "9c09be26-39c3-44c0-a451-6baff67d9c07")
 		(property "Reference" "R1"
-			(at 172.72 101.6 90)
+			(at 172.974 103.886 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -886,7 +929,7 @@
 			)
 		)
 		(property "Value" "100k"
-			(at 172.72 104.14 90)
+			(at 172.974 106.426 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -894,7 +937,7 @@
 			)
 		)
 		(property "Footprint" "Resistor_THT:R_Axial_DIN0204_L3.6mm_D1.6mm_P5.08mm_Horizontal"
-			(at 172.72 109.728 90)
+			(at 172.72 103.378 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -903,7 +946,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 172.72 107.95 0)
+			(at 172.72 101.6 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -912,7 +955,7 @@
 			)
 		)
 		(property "Description" "Resistor"
-			(at 172.72 107.95 0)
+			(at 172.72 101.6 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -943,8 +986,8 @@
 	)
 	(symbol
 		(lib_id "Device:C")
-		(at 154.94 107.95 270)
-		(mirror x)
+		(at 156.21 97.79 0)
+		(mirror y)
 		(unit 1)
 		(exclude_from_sim no)
 		(in_bom yes)
@@ -952,7 +995,7 @@
 		(dnp no)
 		(uuid "c787d138-3418-43e9-b5b6-21e07023bf11")
 		(property "Reference" "C2A1"
-			(at 154.94 115.57 90)
+			(at 163.83 97.79 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -960,7 +1003,7 @@
 			)
 		)
 		(property "Value" "DNP"
-			(at 154.94 113.03 90)
+			(at 161.29 97.79 90)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -968,7 +1011,7 @@
 			)
 		)
 		(property "Footprint" "Capacitor_THT:C_Disc_D5.0mm_W2.5mm_P2.50mm"
-			(at 151.13 106.9848 0)
+			(at 155.2448 101.6 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -977,7 +1020,7 @@
 			)
 		)
 		(property "Datasheet" "~"
-			(at 154.94 107.95 0)
+			(at 156.21 97.79 0)
 			(effects
 				(font
 					(size 1.27 1.27)
@@ -986,7 +1029,7 @@
 			)
 		)
 		(property "Description" "Unpolarized capacitor"
-			(at 154.94 107.95 0)
+			(at 156.21 97.79 0)
 			(effects
 				(font
 					(size 1.27 1.27)
