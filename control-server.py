@@ -65,6 +65,21 @@ AC_SEND_INTERVAL_SEC = float(os.getenv("AC_SEND_INTERVAL_SEC", "2"))
 AC_RETRY_BACKOFF = float(os.getenv("AC_RETRY_BACKOFF", "2.0"))   # 지수 백오프 배수
 AC_RETRY_JITTER_MS = int(os.getenv("AC_RETRY_JITTER_MS", "200")) # 0~지정ms 랜덤 지터
 
+# Zero W2 최적화: 스레드 수 제한, 로그 억제, HTTP keep-alive
+MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
+QUIET_LOGS = os.getenv("QUIET_LOGS", "1").lower() in ("1", "true", "yes")
+
+_session = requests.Session()
+try:
+    from requests.adapters import HTTPAdapter
+    _session.mount("http://", HTTPAdapter(pool_connections=16, pool_maxsize=32))
+    _session.mount("https://", HTTPAdapter(pool_connections=16, pool_maxsize=32))
+except Exception:
+    pass
+
+def _http_get(url: str, *, params: dict | None = None, timeout: float = HTTP_TIMEOUT):
+    return _session.get(url, params=params, timeout=timeout)
+
 # ========================
 # 액션 로그 설정 (용량 제한 로테이션)
 # ========================
@@ -164,19 +179,20 @@ def udp_listener():
                             entry["state"] = msg.get("state")
                             entry["state_last_seen"] = time.time()
                         devices[dev_id] = entry
-                        # 응답 로그 출력
-                        try:
-                            st = msg.get("state") if isinstance(msg.get("state"), dict) else None
-                            has_state = "yes" if st else "no"
-                            power = None if not st else ("on" if st.get("power") else "off")
-                            mode = None if not st else st.get("mode")
-                            temp = None if not st else st.get("temp")
-                            extra = ""
-                            if st is not None:
-                                extra = f" power={power} mode={mode} temp={temp}"
-                            print(f"[UDP] resp id={dev_id} from {entry['ip']}:{entry['port']} state={has_state}{extra}")
-                        except Exception:
-                            pass
+                        # 응답 로그 출력(저사양 장치에서는 기본 억제)
+                        if not QUIET_LOGS:
+                            try:
+                                st = msg.get("state") if isinstance(msg.get("state"), dict) else None
+                                has_state = "yes" if st else "no"
+                                power = None if not st else ("on" if st.get("power") else "off")
+                                mode = None if not st else st.get("mode")
+                                temp = None if not st else st.get("temp")
+                                extra = ""
+                                if st is not None:
+                                    extra = f" power={power} mode={mode} temp={temp}"
+                                print(f"[UDP] resp id={dev_id} from {entry['ip']}:{entry['port']} state={has_state}{extra}")
+                            except Exception:
+                                pass
         except Exception as e:
             # 타임아웃은 조용히 무시
             if isinstance(e, socket.timeout):
@@ -620,7 +636,8 @@ def _schedule_send_off():
     all_off()
 
 def _schedule_loop():
-    print("[Schedule] Started (every 1 minute)")
+    if not QUIET_LOGS:
+        print("[Schedule] Started (every 1 minute)")
     while True:
         try:
             now = datetime.now()
@@ -687,7 +704,8 @@ def _schedule_loop():
                 if do_on:
                     key = (sid, "on")
                     if schedule_last_sent.get(key) != now_min:
-                        print(f"[Schedule] #{sid} ON dispatch (mode={sch['mode']} temp={sch['temp']})")
+                        if not QUIET_LOGS:
+                            print(f"[Schedule] #{sid} ON dispatch (mode={sch['mode']} temp={sch['temp']})")
                         write_action_log("schedule_on", {"schedule_id": sid, "mode": sch["mode"], "temp": sch["temp"], "time_min": now_min})
                         _schedule_send_on(sch["mode"], sch["temp"])
                         schedule_last_sent[key] = now_min
@@ -695,7 +713,8 @@ def _schedule_loop():
                 if do_off:
                     key = (sid, "off")
                     if schedule_last_sent.get(key) != now_min:
-                        print(f"[Schedule] #{sid} OFF dispatch")
+                        if not QUIET_LOGS:
+                            print(f"[Schedule] #{sid} OFF dispatch")
                         write_action_log("schedule_off", {"schedule_id": sid, "time_min": now_min})
                         _schedule_send_off()
                         schedule_last_sent[key] = now_min
@@ -704,7 +723,8 @@ def _schedule_loop():
                             try:
                                 update_schedule(sid, ScheduleUpdate(enabled=False))
                                 write_action_log("schedule_once_disabled", {"schedule_id": sid})
-                                print(f"[Schedule] #{sid} once disabled after OFF")
+                                if not QUIET_LOGS:
+                                    print(f"[Schedule] #{sid} once disabled after OFF")
                             except Exception as _e:
                                 print(f"[Schedule] #{sid} disable failed: {_e}")
         except Exception as e:
@@ -749,7 +769,7 @@ def send_ac_command(dev: Dict[str, Any], params: Dict[str, Any]) -> Dict[str, An
 
         for i in range(attempts):
             try:
-                resp = requests.get(url, params=params, timeout=HTTP_TIMEOUT)
+                resp = _http_get(url, params=params, timeout=HTTP_TIMEOUT)
                 results.append({
                     "ok": resp.ok,
                     "status_code": resp.status_code,
@@ -790,7 +810,7 @@ def get_device_health(dev: Dict[str, Any]) -> Dict[str, Any]:
     """장치 health check"""
     try:
         url = f"http://{dev['ip']}:{dev['port']}/health"
-        resp = requests.get(url, timeout=HTTP_TIMEOUT)
+        resp = _http_get(url, timeout=HTTP_TIMEOUT)
         return {"ok": resp.ok, "status_code": resp.status_code}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -800,7 +820,7 @@ def get_device_state(dev: Dict[str, Any]) -> Dict[str, Any]:
     """장치 상태 조회"""
     try:
         url = f"http://{dev['ip']}:{dev['port']}/ac/state"
-        resp = requests.get(url, timeout=HTTP_TIMEOUT)
+        resp = _http_get(url, timeout=HTTP_TIMEOUT)
         if resp.ok:
             return {"ok": True, "state": resp.json()}
         return {"ok": False, "status_code": resp.status_code}
@@ -1054,7 +1074,7 @@ def _execute_batch_command(unique_ids: list[str], params: dict) -> dict:
     }
 
     if target_devs:
-        max_workers = min(16, max(1, len(target_devs)))
+        max_workers = min(MAX_WORKERS, max(1, len(target_devs)))
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         try:
             future_to_id: Dict[concurrent.futures.Future, str] = {}
@@ -1170,7 +1190,7 @@ def all_on(cmd: AcCommand | None = None):
     if not devs:
         return {"command": params, "results": results}
 
-    max_workers = min(16, max(1, len(devs)))
+    max_workers = min(MAX_WORKERS, max(1, len(devs)))
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     try:
         future_to_id: Dict[concurrent.futures.Future, str] = {}
@@ -1229,7 +1249,7 @@ def all_off():
     if not devs:
         return {"command": params, "results": results}
 
-    max_workers = min(16, max(1, len(devs)))
+    max_workers = min(MAX_WORKERS, max(1, len(devs)))
     executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
     try:
         future_to_id: Dict[concurrent.futures.Future, str] = {}
