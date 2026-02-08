@@ -10,10 +10,18 @@ import concurrent.futures
 import logging
 
 import requests
+try:
+    import httpx  # optional, used when available
+except Exception:
+    httpx = None
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
+try:
+    from fastapi.responses import ORJSONResponse as DefaultJSONResponse
+except Exception:
+    from fastapi.responses import JSONResponse as DefaultJSONResponse
 from pydantic import BaseModel
 import uvicorn
 import os
@@ -68,17 +76,38 @@ AC_RETRY_JITTER_MS = int(os.getenv("AC_RETRY_JITTER_MS", "200")) # 0~지정ms �
 # Zero W2 최적화: 스레드 수 제한, 로그 억제, HTTP keep-alive
 MAX_WORKERS = int(os.getenv("MAX_WORKERS", "4"))
 QUIET_LOGS = os.getenv("QUIET_LOGS", "1").lower() in ("1", "true", "yes")
+STATUS_CACHE_TTL_SEC = int(os.getenv("STATUS_CACHE_TTL_SEC", "10"))
 
-_session = requests.Session()
-try:
-    from requests.adapters import HTTPAdapter
-    _session.mount("http://", HTTPAdapter(pool_connections=16, pool_maxsize=32))
-    _session.mount("https://", HTTPAdapter(pool_connections=16, pool_maxsize=32))
-except Exception:
-    pass
+_status_cache: dict[str, Any] = {"data": None, "ts": 0.0}
 
-def _http_get(url: str, *, params: dict | None = None, timeout: float = HTTP_TIMEOUT):
-    return _session.get(url, params=params, timeout=timeout)
+# HTTP 클라이언트 (httpx 우선, 없으면 requests.Session)
+if httpx is not None:
+    _client = httpx.Client(http1=True, limits=httpx.Limits(max_keepalive_connections=32, max_connections=64))
+    def _http_get(url: str, *, params: dict | None = None, timeout: float = HTTP_TIMEOUT):
+        return _client.get(url, params=params, timeout=timeout)
+else:
+    _session = requests.Session()
+    try:
+        from requests.adapters import HTTPAdapter
+        _session.mount("http://", HTTPAdapter(pool_connections=16, pool_maxsize=32))
+        _session.mount("https://", HTTPAdapter(pool_connections=16, pool_maxsize=32))
+    except Exception:
+        pass
+    def _http_get(url: str, *, params: dict | None = None, timeout: float = HTTP_TIMEOUT):
+        return _session.get(url, params=params, timeout=timeout)
+
+# SQLite PRAGMA 튜닝
+def _tune_sqlite(conn: sqlite3.Connection):
+    try:
+        cur = conn.cursor()
+        cur.execute("PRAGMA journal_mode=WAL;")
+        cur.execute("PRAGMA synchronous=NORMAL;")
+        cur.execute("PRAGMA temp_store=MEMORY;")
+        # 음수: KB 단위 캐시, -20000 => 약 20MB
+        cur.execute("PRAGMA cache_size=-20000;")
+        conn.commit()
+    except Exception:
+        pass
 
 # ========================
 # 액션 로그 설정 (용량 제한 로테이션)
@@ -242,7 +271,7 @@ listener_thread.start()
 # ========================
 # FastAPI 서버
 # ========================
-app = FastAPI(title="IR Remote Server")
+app = FastAPI(title="IR Remote Server", default_response_class=DefaultJSONResponse)
 
 # CORS 설정
 app.add_middleware(
@@ -329,6 +358,7 @@ class ScheduleItem(BaseModel):
 def _db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    _tune_sqlite(conn)
     return conn
 
 def _create_schema(conn: sqlite3.Connection):
@@ -941,6 +971,11 @@ def get_state(device_id: str):
 @app.get("/devices/get_status")
 def get_all_status():
     """모든 장치의 상태를 한번에 조회"""
+    # 캐시 체크
+    now_ts = time.time()
+    if _status_cache.get("data") is not None and (now_ts - float(_status_cache.get("ts", 0))) < STATUS_CACHE_TTL_SEC:
+        return _status_cache["data"]
+
     cleanup_devices()
     with devices_lock:
         devs = list(devices.values())
@@ -976,6 +1011,9 @@ def get_all_status():
             "state_last_seen_age_sec": state_age_sec,
         }
         status_list.append(status)
+    # 캐시 저장
+    _status_cache["data"] = status_list
+    _status_cache["ts"] = now_ts
     return status_list
 
 # Web 호환용 별칭 (기존 프론트가 /devices/status를 호출)

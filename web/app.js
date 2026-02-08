@@ -937,8 +937,9 @@ function setupEventListeners() {
 // 자동 새로고침
 function startAutoRefresh() {
     setInterval(async () => {
+        if (document.hidden) return; // 백그라운드 탭에서는 폴링 일시중지
         await updateStatus();
-    }, 5000); // 5초마다 업데이트
+    }, 15000); // 15초마다 업데이트
     
     // 초기 health 히스토리 초기화
     const allDeviceIds = DEVICE_GRID_ORDER.flat();
