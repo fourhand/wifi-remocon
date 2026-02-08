@@ -882,10 +882,15 @@ function setupEventListeners() {
             typeGroup.querySelectorAll('.btn-option').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const type = btn.dataset.type;
+            // weekly는 날짜 비활성, daily/once는 날짜 표시
             if (type === 'weekly') {
                 rowWeekly.style.display = '';
+                rowOnce.style.display = 'none';
+                if (startDateInput) startDateInput.value = '';
+                if (endDateInput) endDateInput.value = '';
             } else {
-                rowWeekly.style.display = 'none';
+                rowWeekly.style.display = (type === 'weekly') ? '' : 'none';
+                rowOnce.style.display = '';
             }
         });
     }
@@ -907,14 +912,15 @@ function setupEventListeners() {
             const endTotalMin = ampmToMin(endAmPm.value, eh, em);
             const sd = startDateInput ? (startDateInput.value || null) : null;
             const ed = endDateInput ? (endDateInput.value || null) : null;
+            // weekly는 날짜 무시
             const payload = {
                 schedule_type: type,
                 start_time_min: startTotalMin,
                 end_time_min: endTotalMin,
-                // once: start/end 필수(비었으면 null), daily/weekly: 선택적
-                start_date: sd,
-                end_date: ed,
-                // 하위호환용: once인 경우 date도 함께 세팅
+                // once: start/end 사용, weekly: null 강제
+                start_date: (type === 'weekly') ? null : sd,
+                end_date:   (type === 'weekly') ? null : ed,
+                // once만 하위호환 date 세팅
                 date: type === 'once' ? (sd || null) : null,
                 weekday: type === 'weekly' ? parseInt(weekdaySelect.value, 10) : null,
             };

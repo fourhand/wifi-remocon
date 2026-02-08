@@ -552,6 +552,11 @@ def update_schedule(sid: int, payload: ScheduleUpdate):
                 else:
                     fields.append(f"{k}=?")
                     values.append(v)
+            # weekly 타입이면 날짜 관련 컬럼을 모두 지움 (문제 원인 차단)
+            if payload.schedule_type == "weekly":
+                fields.append("date=?");        values.append(None)
+                fields.append("start_date=?");  values.append(None)
+                fields.append("end_date=?");    values.append(None)
             # backward compat: date만 온 경우 start/end에 동기화
             if "start_date=?" not in fields and "end_date=?" not in fields and "date=?" in fields:
                 idx = fields.index("date=?")
@@ -634,6 +639,10 @@ def _schedule_loop():
                 # 날짜 범위 제한 (옵션)
                 sd = sch.get("start_date") or sch.get("date")
                 ed = sch.get("end_date") or sch.get("date")
+                # weekly는 날짜 설정의 영향을 받지 않도록 무시
+                if st == "weekly":
+                    sd = None
+                    ed = None
                 def _parse_date(s: str | None):
                     if not s:
                         return None
