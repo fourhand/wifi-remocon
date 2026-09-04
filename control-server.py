@@ -55,9 +55,9 @@ STATE_OK_MAX_AGE_SEC = int(os.getenv("STATE_OK_MAX_AGE_SEC", str(HEALTH_OK_MAX_A
 STATE_HTTP_FALLBACK = os.getenv("STATE_HTTP_FALLBACK", "0").lower() in ("1", "true", "yes")
 
 HTTP_PATH_SET = "/ac/set"    # ESP8266 코드에 맞춤
-HTTP_TIMEOUT = 2.0
+HTTP_TIMEOUT = float(os.getenv("DEVICE_HTTP_TIMEOUT_SEC", "5.0"))
 # 전체 제어 시, 장치별 최대 대기 시간(초) - 초과 시 타임아웃으로 처리
-ALL_CMD_PER_DEVICE_TIMEOUT_SEC = int(os.getenv("ALL_CMD_PER_DEVICE_TIMEOUT_SEC", "10"))
+ALL_CMD_PER_DEVICE_TIMEOUT_SEC = int(os.getenv("ALL_CMD_PER_DEVICE_TIMEOUT_SEC", "20"))
 # IR 명령 전송 재시도 설정 (기본 1회 전송)
 AC_SEND_ATTEMPTS = int(os.getenv("AC_SEND_ATTEMPTS", "6"))
 AC_SEND_INTERVAL_SEC = float(os.getenv("AC_SEND_INTERVAL_SEC", "2"))
@@ -1476,6 +1476,12 @@ def unregister_mdns():
             print(f"[mDNS] Failed to unregister service: {e}")
 
 if __name__ == "__main__":
+    if hasattr(sys.stdout, "reconfigure"):
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
     try:
         print(f"[HTTP] Server starting on {SERVER_HOST}:{SERVER_PORT}")
         print(f"[HTTP] Web interface: http://localhost:{SERVER_PORT}/")

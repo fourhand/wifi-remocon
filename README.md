@@ -71,6 +71,22 @@ cd C:\Users\k\Documents\wifi-remocon
 
 작업 상태 확인: `schtasks /Query /TN WifiRemoconControlServer`
 
+### 6. 서버 동작 관련 환경 변수
+
+명령 전송 대기 시간을 늘리거나 줄이고 싶다면, 서버 실행 전에 다음 환경 변수를 설정할 수 있습니다.
+
+| 환경 변수 | 기본값 | 설명 |
+|-----------|--------|------|
+| `DEVICE_HTTP_TIMEOUT_SEC` | 5.0초 | 각 장치 HTTP 요청을 기다리는 시간. 장치가 느릴 경우 값을 키우세요. |
+| `ALL_CMD_PER_DEVICE_TIMEOUT_SEC` | 20초 | 배치 제어 시 장치별 총 대기 시간. 이 시간 안에 응답이 없으면 `timeout`으로 처리됩니다. |
+
+예시(Windows PowerShell):
+```powershell
+$env:DEVICE_HTTP_TIMEOUT_SEC = "8"
+$env:ALL_CMD_PER_DEVICE_TIMEOUT_SEC = "30"
+.\start-server.bat
+```
+
 ## 문제 해결
 
 ### Python을 찾을 수 없는 경우
