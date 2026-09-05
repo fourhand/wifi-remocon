@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >nul
 echo ========================================
-echo hosts 파일에 aircon-controller 추가
+echo hosts 파일에 ac.local 추가
 echo ========================================
 echo.
 
@@ -40,9 +40,9 @@ REM hosts 파일 경로
 set HOSTS_FILE=%SystemRoot%\System32\drivers\etc\hosts
 
 REM 이미 등록되어 있는지 확인
-findstr /c:"aircon-controller.local" "%HOSTS_FILE%" >nul 2>&1
+findstr /c:"ac.local" "%HOSTS_FILE%" >nul 2>&1
 if %errorlevel% equ 0 (
-    echo [정보] hosts 파일에 이미 aircon-controller.local이 등록되어 있습니다.
+    echo [정보] hosts 파일에 이미 ac.local이 등록되어 있습니다.
     echo.
     echo 기존 항목을 제거하고 새로 추가하시겠습니까? (Y/N)
     set /p CONFIRM=
@@ -53,18 +53,18 @@ if %errorlevel% equ 0 (
     )
     
     REM 기존 항목 제거 (임시 파일 사용)
-    findstr /v /c:"aircon-controller.local" "%HOSTS_FILE%" > "%HOSTS_FILE%.tmp"
+    findstr /v /c:"ac.local" "%HOSTS_FILE%" > "%HOSTS_FILE%.tmp"
     move /y "%HOSTS_FILE%.tmp" "%HOSTS_FILE%" >nul
 )
 
 REM hosts 파일에 추가
-echo %IP%  aircon-controller.local >> "%HOSTS_FILE%"
+echo %IP%  ac.local >> "%HOSTS_FILE%"
 
 if %errorlevel% equ 0 (
     echo.
     echo [성공] hosts 파일에 추가되었습니다!
     echo.
-    echo 이제 http://aircon-controller.local:8000/ 으로 접속할 수 있습니다.
+    echo 이제 http://ac.local:8000/ 으로 접속할 수 있습니다.
     echo.
 ) else (
     echo.

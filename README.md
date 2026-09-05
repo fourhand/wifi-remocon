@@ -50,7 +50,7 @@ deactivate
 ### 4. 웹 브라우저에서 접속
 
 - http://localhost:8000
-- http://aircon-controller.local:8000 (mDNS 사용 시)
+- http://ac.local:8000 (mDNS 사용 시)
 
 ### 5. Windows 자동 시작 설정 (선택)
 

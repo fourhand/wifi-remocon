@@ -42,7 +42,7 @@ UDP_LISTEN_PORT = 4210       # ESP8266과 동일
 DEVICE_TIMEOUT_SEC = 60 * 5  # 5분
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
-MDNS_HOSTNAME = "aircon-controller"
+MDNS_HOSTNAME = "ac"
 MDNS_SERVICE_TYPE = "_http._tcp.local."
 DISCOVERY_INTERVAL_SEC = int(os.getenv("DISCOVERY_INTERVAL_SEC", "30"))  # 서버 주도 discover 주기 (기본 30초)
 # 브로드캐스트 기반 건강 판단: 최근 응답 허용 최대 연령(초)

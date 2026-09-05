@@ -8,7 +8,7 @@ echo ""
 # 스크립트 위치로 이동
 cd "$(dirname "$0")"
 
-# Git 업데이트
+# Git 업데이트 (없으면 GitHub tarball)
 if command -v git >/dev/null 2>&1; then
   echo "[업데이트] Git 업데이트 중..."
   git fetch --all || true
@@ -16,6 +16,10 @@ if command -v git >/dev/null 2>&1; then
   echo "[업데이트] 현재 브랜치: $BRANCH"
   git reset --hard "origin/$BRANCH" || git pull --rebase || true
   echo "[업데이트] Git 업데이트 완료"
+elif [ -x "./github-pull.sh" ]; then
+  echo "[업데이트] git 없음, GitHub tarball로 업데이트합니다."
+  ./github-pull.sh
+  exit $?
 else
   echo "[업데이트] git 명령을 찾을 수 없습니다. Git 업데이트를 건너뜁니다."
 fi
