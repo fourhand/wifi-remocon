@@ -66,7 +66,7 @@ cd C:\Users\k\Documents\wifi-remocon
 | 작업 이름 | 동작 |
 |-----------|------|
 | `WifiRemoconControlServer` | 부팅 후 60초 뒤 서버 시작 (SYSTEM, 로그인 불필요) |
-| `WifiRemoconAutoUpdate` | 10분마다 GitHub `main` 확인 → **커밋이 바뀐 경우에만** 반영 후 서버 재시작 |
+| `WifiRemoconAutoUpdate` | 부팅 2분 뒤부터 10분마다 GitHub `main` 확인 → **커밋이 바뀐 경우에만** 반영 후 서버 재시작. 재부팅 후에도 계속 |
 
 - 구현: `update-check.bat` → `github-pull.py`
 - 로컬에 커밋되지 않은 변경이 있으면 git 업데이트를 건너뛰어 작업 내용을 보호합니다.

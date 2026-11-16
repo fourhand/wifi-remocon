@@ -53,12 +53,18 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$serverSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew;" ^
   "Register-ScheduledTask -TaskName '%TASK_NAME%' -Action $serverAction -Trigger $serverTrigger -Principal $principal -Settings $serverSettings -Force | Out-Null;" ^
   "$updateAction=New-ScheduledTaskAction -Execute 'cmd.exe' -Argument ('/c \"' + $scriptDir + '\update-check.bat\"') -WorkingDirectory $scriptDir;" ^
-  "$updateTrigger=New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(2)) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration ([TimeSpan]::MaxValue);" ^
+  "$rep=(New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Days 3650)).Repetition;" ^
+  "$rep.StopAtDurationEnd=$false;" ^
+  "$updateTrigger=New-ScheduledTaskTrigger -AtStartup;" ^
+  "$updateTrigger.Delay='PT2M';" ^
+  "$updateTrigger.Repetition=$rep;" ^
+  "$dailyTrigger=New-ScheduledTaskTrigger -Daily -At '00:05';" ^
+  "$dailyTrigger.Repetition=$rep;" ^
   "$updateSettings=New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -MultipleInstances IgnoreNew;" ^
-  "Register-ScheduledTask -TaskName '%UPDATE_TASK_NAME%' -Action $updateAction -Trigger $updateTrigger -Principal $principal -Settings $updateSettings -Force | Out-Null;" ^
+  "Register-ScheduledTask -TaskName '%UPDATE_TASK_NAME%' -Action $updateAction -Trigger @($updateTrigger,$dailyTrigger) -Principal $principal -Settings $updateSettings -Force | Out-Null;" ^
   "Write-Host '[완료] 작업 스케줄러에 등록되었습니다.';" ^
   "Write-Host '  - 서버: 부팅 후 60초 뒤 자동 시작 (로그인 불필요)';" ^
-  "Write-Host '  - 업데이트: 10분마다 GitHub 확인, 변경 시에만 재시작';" ^
+  "Write-Host '  - 업데이트: 부팅 2분 뒤부터 10분마다 GitHub 확인, 재부팅 후에도 계속';" ^
   "Write-Host '  - 실행 계정: SYSTEM';" ^
   "Write-Host '  - 작업 이름: %TASK_NAME%, %UPDATE_TASK_NAME%'"
 
