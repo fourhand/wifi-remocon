@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import base64
+import hashlib
+import hmac
 import sys
 import threading
 import socket
@@ -13,7 +16,7 @@ import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from pydantic import BaseModel
 import uvicorn
 import os
@@ -42,6 +45,7 @@ UDP_LISTEN_PORT = 4210       # ESP8266과 동일
 DEVICE_TIMEOUT_SEC = 60 * 5  # 5분
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
+WEB_PASSWORD = "yd1st"
 MDNS_HOSTNAME = "ac"
 MDNS_SERVICE_TYPE = "_http._tcp.local."
 DISCOVERY_INTERVAL_SEC = int(os.getenv("DISCOVERY_INTERVAL_SEC", "30"))  # 서버 주도 discover 주기 (기본 30초)
@@ -236,6 +240,38 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _web_password_ok(request: Request) -> bool:
+    header = request.headers.get("authorization", "")
+    scheme, _, token = header.partition(" ")
+    if scheme.lower() != "basic" or not token:
+        return False
+    try:
+        decoded = base64.b64decode(token.strip()).decode("utf-8")
+    except Exception:
+        return False
+    _, sep, password = decoded.partition(":")
+    if not sep:
+        return False
+    given = hashlib.sha256(password.encode("utf-8")).digest()
+    expect = hashlib.sha256(WEB_PASSWORD.encode("utf-8")).digest()
+    return hmac.compare_digest(given, expect)
+
+
+@app.middleware("http")
+async def require_entry_password(request: Request, call_next):
+    """사람용 화면과 제어 입구. 기기가 상태를 보내는 주소는 열어둠."""
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if request.url.path.rstrip("/") == "/devices/put_status":
+        return await call_next(request)
+    if _web_password_ok(request):
+        return await call_next(request)
+    return Response(
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="wifi-remocon"'},
+    )
 
 # 정적 파일 서빙 (웹 인터페이스) - API 엔드포인트 이후에 마운트
 
