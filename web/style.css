@@ -986,3 +986,47 @@ body.theme-cool .temp-control {
     grid-template-columns: repeat(3, 1fr);
 }
 
+/* 토스트 */
+.toast-container {
+    position: fixed;
+    left: 50%;
+    bottom: calc(24px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    width: min(92vw, 360px);
+}
+.toast {
+    width: 100%;
+    padding: 12px 16px;
+    border-radius: 10px;
+    background: rgba(44, 24, 16, 0.92);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    text-align: center;
+    box-shadow: 0 4px 16px rgba(44, 24, 16, 0.25);
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.22s ease, transform 0.22s ease;
+    white-space: pre-line;
+}
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+.toast.success {
+    background: rgba(74, 110, 60, 0.95);
+}
+.toast.error {
+    background: rgba(128, 0, 32, 0.95);
+}
+.toast.warning {
+    background: rgba(204, 119, 34, 0.95);
+}
+

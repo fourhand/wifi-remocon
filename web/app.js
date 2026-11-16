@@ -177,6 +177,24 @@ function formatBatchSummaryMessage(info) {
     return parts.join('\n');
 }
 
+function showToast(message, type = 'success', durationMs = 2500) {
+    if (!message) return;
+    const container = document.getElementById('toastContainer');
+    if (!container) {
+        console.warn(message);
+        return;
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = message;
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('show'));
+    window.setTimeout(() => {
+        toast.classList.remove('show');
+        window.setTimeout(() => toast.remove(), 220);
+    }, durationMs);
+}
+
 // 초기화
 async function init() {
     // 저장된 설정으로 제어 패널 초기화
@@ -791,18 +809,23 @@ function setupEventListeners() {
         
         let summaryMessage = '';
         let errorMessage = '';
+        let toastType = 'success';
         try {
             if (selectedDeviceIds.length > 1) {
                 // 2개 이상 선택 시 백엔드 병렬 엔드포인트 사용
                 const batchResult = await api.setDevicesBatch(selectedDeviceIds, command);
                 const info = summarizeBatchResult(batchResult, selectedDeviceIds.length);
                 summaryMessage = formatBatchSummaryMessage(info);
+                if ((info.failed ?? 0) > 0 || (info.missingIds?.length ?? 0) > 0) {
+                    toastType = (info.succeeded ?? 0) > 0 ? 'warning' : 'error';
+                }
             } else {
                 // 단일 선택은 기존 단일 엔드포인트 사용
                 const onlyId = selectedDeviceIds[0];
                 const singleResult = await api.setDevice(onlyId, command);
                 if (!singleResult || singleResult.ok === false || (singleResult.result && singleResult.result.ok === false)) {
                     summaryMessage = `장치 ${onlyId} 제어에 실패했습니다.`;
+                    toastType = 'error';
                 } else {
                     summaryMessage = `장치 ${onlyId} 제어 명령을 전송했습니다.`;
                 }
@@ -812,6 +835,7 @@ function setupEventListeners() {
             console.error('Error applying command:', error);
             summaryMessage = '';
             errorMessage = error?.message ? `제어 중 오류: ${error.message}` : '제어 중 알 수 없는 오류가 발생했습니다.';
+            toastType = 'error';
         } finally {
             // 실패/성공 모두 버튼 복구 및 렌더링 반영
             pendingDevices.clear();
@@ -819,14 +843,9 @@ function setupEventListeners() {
             setActionButtonsDisabled(false);
         }
 
-        const notifications = [summaryMessage, errorMessage].filter(Boolean);
-        if (notifications.length > 0) {
-            const message = notifications.join('\n');
-            if (typeof window !== 'undefined' && window.alert) {
-                window.alert(message);
-            } else {
-                console.warn(message);
-            }
+        const message = [summaryMessage, errorMessage].filter(Boolean).join('\n');
+        if (message) {
+            showToast(message, toastType);
         }
     });
     
