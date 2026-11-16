@@ -52,24 +52,42 @@ deactivate
 - http://localhost:8000
 - http://ac.local:8000 (mDNS 사용 시)
 
-### 5. Windows 자동 시작 설정 (선택)
+### 5. Windows 자동 시작 / 자동 업데이트 설정 (선택)
 
-부팅할 때 자동으로 서버를 구동하려면 **관리자 권한** PowerShell(또는 명령 프롬프트)에서 아래 스크립트를 실행하세요.
+부팅 시 서버 기동 + GitHub 변경 시 자동 반영을 쓰려면 **관리자 권한** PowerShell(또는 명령 프롬프트)에서 아래를 실행하세요.
 
 ```powershell
 cd C:\Users\k\Documents\wifi-remocon
 .\register-autostart.bat
 ```
 
-- Windows 작업 스케줄러에 `WifiRemoconControlServer` 작업이 생성되며, 부팅 후 30초 뒤 `start-server.bat`을 SYSTEM 권한으로 실행합니다.
-- 자동 시작을 해제하려면:
+등록되는 작업 스케줄러 항목:
+
+| 작업 이름 | 동작 |
+|-----------|------|
+| `WifiRemoconControlServer` | 부팅 후 60초 뒤 서버 시작 (SYSTEM, 로그인 불필요) |
+| `WifiRemoconAutoUpdate` | 10분마다 GitHub `main` 확인 → **커밋이 바뀐 경우에만** 반영 후 서버 재시작 |
+
+- 구현: `update-check.bat` → `github-pull.py`
+- 로컬에 커밋되지 않은 변경이 있으면 git 업데이트를 건너뛰어 작업 내용을 보호합니다.
+- 로그: `logs\update-check.log` 또는 `%ProgramData%\WifiRemocon\update-check.log`
+- 해제:
 
 ```powershell
 cd C:\Users\k\Documents\wifi-remocon
 .\unregister-autostart.bat
 ```
 
-작업 상태 확인: `schtasks /Query /TN WifiRemoconControlServer`
+작업 상태 확인:
+```powershell
+schtasks /Query /TN WifiRemoconControlServer /V /FO LIST
+schtasks /Query /TN WifiRemoconAutoUpdate /V /FO LIST
+```
+
+수동 업데이트 확인:
+```powershell
+.\update-check.bat
+```
 
 ### 6. 서버 동작 관련 환경 변수
 

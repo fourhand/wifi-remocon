@@ -1,4 +1,6 @@
 schedules.db
+.deploy-sha
+.deploy-lock
 # Python
 __pycache__/
 *.py[cod]

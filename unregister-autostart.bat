@@ -3,10 +3,11 @@ chcp 65001 >nul
 setlocal enableextensions
 
 set TASK_NAME=WifiRemoconControlServer
+set UPDATE_TASK_NAME=WifiRemoconAutoUpdate
 set STARTUP_LINK=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\WifiRemoconControlServer.lnk
 
 echo ========================================
-echo 에어컨 제어 서버 자동 시작 제거
+echo 에어컨 제어 서버 자동 시작/업데이트 제거
 echo ========================================
 echo.
 
@@ -14,8 +15,15 @@ set REMOVED=0
 
 schtasks /Query /TN "%TASK_NAME%" >nul 2>&1
 if %errorlevel%==0 (
-    echo 작업 스케줄러 작업을 삭제합니다...
+    echo 서버 자동 시작 작업을 삭제합니다...
     schtasks /Delete /TN "%TASK_NAME%" /F >nul 2>&1
+    if %errorlevel%==0 set REMOVED=1
+)
+
+schtasks /Query /TN "%UPDATE_TASK_NAME%" >nul 2>&1
+if %errorlevel%==0 (
+    echo 자동 업데이트 작업을 삭제합니다...
+    schtasks /Delete /TN "%UPDATE_TASK_NAME%" /F >nul 2>&1
     if %errorlevel%==0 set REMOVED=1
 )
 
@@ -26,11 +34,11 @@ if exist "%STARTUP_LINK%" (
 )
 
 if %REMOVED%==0 (
-    echo [안내] 등록된 자동 시작 항목이 없습니다.
+    echo [안내] 등록된 자동 시작/업데이트 항목이 없습니다.
     exit /b 0
 )
 
 echo.
-echo [완료] 자동 시작이 제거되었습니다.
+echo [완료] 자동 시작/업데이트가 제거되었습니다.
 echo.
 exit /b 0
